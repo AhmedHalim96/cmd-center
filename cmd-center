@@ -1,35 +1,31 @@
 #!/usr/bin/env python3
-import subprocess, os, json, sys
+import subprocess, os, json
 
-# --- CONFIG & PATHS ---
+# --- CONSTANTS & PATHS ---
 BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
-# --- NAVIGATION & UI STRINGS ---
 ICON_OPTIONS = "🛠️ Menu Settings" 
 ICON_HOME    = "🏠 HOME"
 ICON_BACK    = "⬅️ BACK"
+SEP_LINE     = "────────────────────────────────────────"
 
 INTERNAL_MENU = {
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
-    "🎨 Change Icon": "INTERNAL:CHANGE_ICON",
-    "✍️ Change Text": "INTERNAL:CHANGE_TEXT",
-    "✏️ Set Editor": "INTERNAL:SET_EDITOR",
     "📝 Edit Config": f"TERM:nvim {CONFIG_PATH}"
 }
 
-def load_data(path):
+def load_json(path):
     if os.path.exists(path):
         with open(path, 'r') as f: return json.load(f)
     return {}
 
-def save_data(path, data):
+def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
 def get_flat_menu(menu, prefix=""):
-    """Turns the tree into 'Folder > Subfolder > Command'"""
     flat = {}
     for key, value in menu.items():
         path = f"{prefix} > {key}" if prefix else key
@@ -50,109 +46,87 @@ def build_rofi_args(settings):
         args += ["-theme", os.path.expanduser(theme_file)]
     return args
 
-def rofi_menu(options, prompt, args):
-    proc = subprocess.run(args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True)
-    return proc.stdout.strip()
-
 def main():
-    config = load_data(CONFIG_PATH)
-    state = load_data(STATE_PATH)
+    config = load_json(CONFIG_PATH)
+    state = load_json(STATE_PATH)
     settings = config.get("settings", {})
     menu_data = config.get("menu", {})
-    rem_path, rem_hist = settings.get("remember_last_path", True), settings.get("remember_history", True)
     
-    current_path = state.get("last_path", []) if rem_path else []
-    weights = state.get("history", {}) if rem_hist else {}
+    current_path = state.get("last_path", []) if settings.get("remember_last_path", True) else []
+    weights = state.get("history", {}) if settings.get("remember_history", True) else {}
     rofi_args = build_rofi_args(settings)
 
     while True:
         in_options = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
         active_menu = INTERNAL_MENU if in_options else menu_data
         
-        # Resolve the current folder depth
         try:
-            for step in current_path: active_menu = active_menu[step]
-        except: 
-            current_path = []
-            active_menu = menu_data
+            start_depth = 1 if in_options else 0
+            for i in range(start_depth, len(current_path)):
+                active_menu = active_menu[current_path[i]]
+        except:
+            current_path = []; active_menu = menu_data
 
         path_str = " > ".join(current_path)
-        
-        # --- BUILD OPTIONS LIST ---
+        options_dict = {}
+
         if not current_path:
-            # HOME SCREEN: Show Categories + All Flat Commands
+            categories = list(menu_data.keys())
+            if settings.get("remember_history", True):
+                categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
+            
             flat_all = get_flat_menu(menu_data)
-            # Filter internal menu for search too
             for k, v in INTERNAL_MENU.items(): flat_all[f"{ICON_OPTIONS} > {k}"] = v
             
-            # Start with top-level categories
-            options_dict = {k: v for k, v in menu_data.items()}
-            # Merge in all flattened items (commands only)
-            options_dict.update(flat_all)
-            
-            # Sort categories to top, then weighted search results
-            items = list(options_dict.keys())
-            if rem_hist:
-                items.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
-            
-            options = items + [ICON_OPTIONS]
+            options = categories + [ICON_OPTIONS, SEP_LINE] + list(flat_all.keys())
+            options_dict = {**menu_data, **flat_all}
         else:
-            # SUB-MENU: Standard local behavior
             items = list(active_menu.keys())
-            if rem_hist and not in_options:
+            if not in_options and settings.get("remember_history", True):
                 items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
-            
-            options = items.copy()
-            if len(current_path) >= 2:
-                options.insert(0, ICON_HOME); options.insert(1, ICON_BACK)
-            else:
-                options.insert(0, ICON_BACK)
+            options = [ICON_HOME, ICON_BACK] + items if len(current_path) >= 2 else [ICON_BACK] + items
 
         prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else settings.get('prompt_label', 'SEARCH')} "
-        choice = rofi_menu(options, prompt, rofi_args)
-        if not choice: break
+        choice = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True).stdout.strip()
+        
+        if not choice or choice == SEP_LINE:
+            if not choice: break
+            continue
 
-        # --- SELECTION LOGIC ---
         if choice == ICON_BACK: current_path.pop()
         elif choice == ICON_HOME: current_path = []
         elif choice == ICON_OPTIONS: current_path = [ICON_OPTIONS]
         else:
-            # If we are on Home, we use the temporary options_dict to find the selection
-            if not current_path:
-                selection = options_dict.get(choice)
-            else:
-                selection = active_menu.get(choice)
-
-            if not selection: continue
-
-            # --- WEIGHTING ---
-            key_name = f"HOME:{choice}" if not current_path else f"{path_str}:{choice}"
-            if not in_options and rem_hist:
-                weights[key_name] = weights.get(key_name, 0) + 1
-            
-            state["last_path"], state["history"] = current_path, weights
-            save_data(STATE_PATH, state)
+            selection = options_dict.get(choice) if not current_path else active_menu.get(choice)
+            if selection is None: continue
 
             if isinstance(selection, dict):
                 current_path.append(choice)
             else:
-                # --- EXECUTION ---
-                cmd, ed, t = selection, settings.get("editor", "nano"), settings.get("terminal_emulator", "wezterm start --")
-                if cmd.startswith("EDT:"):
-                    f_p = os.path.expanduser(cmd[4:])
-                    cmd = f"{t} {ed} {f_p}" if ed in ["nano", "vim", "nvim", "vi"] else f"{ed} {f_p}"
-                elif cmd.startswith("TERM:"):
-                    cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
-                elif cmd.startswith("WEB:"):
-                    b = settings.get("browser", "xdg-open")
-                    url = cmd[4:] if "://" in cmd[4:] else f"https://{cmd[4:]}"
-                    cmd = f"{b} '{url}'"
+                if not in_options and settings.get("remember_history", True):
+                    w_key = f"HOME:{choice}" if not current_path else f"{path_str}:{choice}"
+                    weights[w_key] = weights.get(w_key, 0) + 1
                 
-                subprocess.Popen(cmd, shell=True, start_new_session=True)
-                return 
+                if selection == "INTERNAL:CLEAR_HIST":
+                    state["history"] = {}; weights = {}; current_path = []
+                else:
+                    t, ed = settings.get("terminal_emulator", "wezterm start --"), settings.get("editor", "nano")
+                    cmd = selection
+                    if cmd.startswith("TERM:"): cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
+                    elif cmd.startswith("EDT:"):
+                        fp = os.path.expanduser(cmd[4:])
+                        cmd = f"{t} {ed} {fp}" if ed in ["nano", "vim", "nvim"] else f"{ed} {fp}"
+                    elif cmd.startswith("WEB:"):
+                        url = cmd[4:] if "://" in cmd[4:] else f"https://{cmd[4:]}"
+                        cmd = f"xdg-open '{url}'"
+                    
+                    subprocess.Popen(cmd, shell=True, start_new_session=True)
+                    state["last_path"], state["history"] = current_path, weights
+                    save_json(STATE_PATH, state)
+                    return
 
-        state["last_path"] = current_path
-        save_data(STATE_PATH, state)
+        state["last_path"], state["history"] = current_path, weights
+        save_json(STATE_PATH, state)
 
 if __name__ == "__main__":
     main()
