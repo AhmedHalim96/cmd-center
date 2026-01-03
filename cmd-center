@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess, os, json
+import subprocess, os, json, glob
 
 # --- CONSTANTS & PATHS ---
 BASE_DIR = os.path.expanduser("~/.config/cmd-center")
@@ -7,6 +7,7 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
 ICON_OPTIONS = "🛠️ Menu Settings" 
+ICON_APPS    = "📱 Applications"
 ICON_HOME    = "🏠 HOME"
 ICON_BACK    = "⬅️ BACK"
 SEP_LINE     = "────────────────────────────────────────"
@@ -25,15 +26,34 @@ def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
+def get_system_apps():
+    """Scans .desktop files to find installed GUI applications."""
+    apps = {}
+    # Common locations for .desktop files
+    paths = ["/usr/share/applications/*.desktop", os.path.expanduser("~/.local/share/applications/*.desktop")]
+    for path_glob in paths:
+        for entry in glob.glob(path_glob):
+            try:
+                with open(entry, 'r') as f:
+                    name, cmd = None, None
+                    for line in f:
+                        if line.startswith("Name=") and not name:
+                            name = line.split("=")[1].strip()
+                        if line.startswith("Exec=") and not cmd:
+                            cmd = line.split("=")[1].split('%')[0].strip() # Clean %u, %f etc
+                        if name and cmd:
+                            apps[name] = cmd
+                            break
+            except: continue
+    return apps
+
 def get_flat_menu(menu, prefix=""):
     flat = {}
     for key, value in menu.items():
         if isinstance(value, dict):
-            # Recursively build path
             new_prefix = f"{prefix} > {key}" if prefix else key
             flat.update(get_flat_menu(value, new_prefix))
         else:
-            # Format: "Label    (Path > Subpath)"
             display_key = f"{key}    ({prefix})" if prefix else key
             flat[display_key] = value
     return flat
@@ -60,11 +80,21 @@ def main():
     rofi_args = build_rofi_args(settings)
 
     while True:
+        # 1. State check
         in_options = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
-        active_menu = INTERNAL_MENU if in_options else menu_data
+        in_apps = len(current_path) > 0 and current_path[0] == ICON_APPS
+        
+        # 2. Resolve active menu
+        if in_options:
+            active_menu = INTERNAL_MENU
+        elif in_apps:
+            active_menu = get_system_apps()
+        else:
+            active_menu = menu_data
         
         try:
-            start_depth = 1 if in_options else 0
+            # Only drill down if we aren't in the flat Apps or Options root
+            start_depth = 1 if (in_options or in_apps) else 0
             for i in range(start_depth, len(current_path)):
                 active_menu = active_menu[current_path[i]]
         except:
@@ -74,33 +104,33 @@ def main():
         options_dict = {}
 
         if not current_path:
-            # 1. Categories
+            # HOME SCREEN
             categories = list(menu_data.keys())
             if settings.get("remember_history", True):
                 categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             
-            # 2. Ranked Global Commands
-            flat_all = get_flat_menu(menu_data)
-            # Add internal items with the (Menu Settings) suffix
-            for k, v in INTERNAL_MENU.items(): 
-                flat_all[f"{k}    ({ICON_OPTIONS})"] = v
+            flat_user = get_flat_menu(menu_data)
+            # Add virtual folders to search pool
+            for k, v in INTERNAL_MENU.items(): flat_user[f"{k}    ({ICON_OPTIONS})"] = v
             
-            global_items = list(flat_all.keys())
+            global_items = list(flat_user.keys())
             if settings.get("remember_history", True):
                 global_items.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             
-            options = categories + [ICON_OPTIONS, SEP_LINE] + global_items
-            options_dict = {**menu_data, **flat_all}
+            # Pin Apps and Settings to the top section
+            options = categories + [ICON_APPS, ICON_OPTIONS, SEP_LINE] + global_items
+            options_dict = {**menu_data, **flat_user}
         else:
             # SUB-MENU view
             items = list(active_menu.keys())
-            if not in_options and settings.get("remember_history", True):
+            # Sort apps alphabetically, user items by weight
+            if in_apps: items.sort()
+            elif not in_options and settings.get("remember_history", True):
                 items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
             
             options = [ICON_HOME, ICON_BACK] + items if len(current_path) >= 2 else [ICON_BACK] + items
 
-        prompt_label = path_str if path_str else settings.get('prompt_label', 'HUB')
-        prompt = f" {settings.get('prompt_icon', '⚡')} {prompt_label} "
+        prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else 'HUB'} "
         choice = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True).stdout.strip()
         
         if not choice or choice == SEP_LINE:
@@ -109,7 +139,7 @@ def main():
 
         if choice == ICON_BACK: current_path.pop()
         elif choice == ICON_HOME: current_path = []
-        elif choice == ICON_OPTIONS: current_path = [ICON_OPTIONS]
+        elif choice in [ICON_OPTIONS, ICON_APPS]: current_path = [choice]
         else:
             selection = options_dict.get(choice) if not current_path else active_menu.get(choice)
             if selection is None: continue
@@ -117,17 +147,17 @@ def main():
             if isinstance(selection, dict):
                 current_path.append(choice)
             else:
-                # History weighting
-                if not in_options and settings.get("remember_history", True):
+                # EXECUTION logic
+                if not (in_options or in_apps) and settings.get("remember_history", True):
                     w_key = f"HOME:{choice}" if not current_path else f"{path_str}:{choice}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
                 if selection == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; weights = {}; current_path = []
                 else:
-                    # EXECUTION
                     t, ed = settings.get("terminal_emulator", "wezterm start --"), settings.get("editor", "nano")
                     cmd = selection
+                    # Formatting...
                     if cmd.startswith("TERM:"): cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
                     elif cmd.startswith("EDT:"):
                         fp = os.path.expanduser(cmd[4:])
@@ -138,8 +168,7 @@ def main():
                     
                     subprocess.Popen(cmd, shell=True, start_new_session=True)
                     state["last_path"], state["history"] = (current_path, weights)
-                    save_json(STATE_PATH, state)
-                    return
+                    save_json(STATE_PATH, state); return
 
         state["last_path"], state["history"] = (current_path, weights)
         save_json(STATE_PATH, state)
