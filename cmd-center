@@ -28,11 +28,14 @@ def save_json(path, data):
 def get_flat_menu(menu, prefix=""):
     flat = {}
     for key, value in menu.items():
-        path = f"{prefix} > {key}" if prefix else key
         if isinstance(value, dict):
-            flat.update(get_flat_menu(value, path))
+            # Recursively build path
+            new_prefix = f"{prefix} > {key}" if prefix else key
+            flat.update(get_flat_menu(value, new_prefix))
         else:
-            flat[path] = value
+            # Format: "Label    (Path > Subpath)"
+            display_key = f"{key}    ({prefix})" if prefix else key
+            flat[display_key] = value
     return flat
 
 def build_rofi_args(settings):
@@ -71,22 +74,33 @@ def main():
         options_dict = {}
 
         if not current_path:
+            # 1. Categories
             categories = list(menu_data.keys())
             if settings.get("remember_history", True):
                 categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             
+            # 2. Ranked Global Commands
             flat_all = get_flat_menu(menu_data)
-            for k, v in INTERNAL_MENU.items(): flat_all[f"{ICON_OPTIONS} > {k}"] = v
+            # Add internal items with the (Menu Settings) suffix
+            for k, v in INTERNAL_MENU.items(): 
+                flat_all[f"{k}    ({ICON_OPTIONS})"] = v
             
-            options = categories + [ICON_OPTIONS, SEP_LINE] + list(flat_all.keys())
+            global_items = list(flat_all.keys())
+            if settings.get("remember_history", True):
+                global_items.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
+            
+            options = categories + [ICON_OPTIONS, SEP_LINE] + global_items
             options_dict = {**menu_data, **flat_all}
         else:
+            # SUB-MENU view
             items = list(active_menu.keys())
             if not in_options and settings.get("remember_history", True):
                 items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
+            
             options = [ICON_HOME, ICON_BACK] + items if len(current_path) >= 2 else [ICON_BACK] + items
 
-        prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else settings.get('prompt_label', 'SEARCH')} "
+        prompt_label = path_str if path_str else settings.get('prompt_label', 'HUB')
+        prompt = f" {settings.get('prompt_icon', '⚡')} {prompt_label} "
         choice = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True).stdout.strip()
         
         if not choice or choice == SEP_LINE:
@@ -103,6 +117,7 @@ def main():
             if isinstance(selection, dict):
                 current_path.append(choice)
             else:
+                # History weighting
                 if not in_options and settings.get("remember_history", True):
                     w_key = f"HOME:{choice}" if not current_path else f"{path_str}:{choice}"
                     weights[w_key] = weights.get(w_key, 0) + 1
@@ -110,6 +125,7 @@ def main():
                 if selection == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; weights = {}; current_path = []
                 else:
+                    # EXECUTION
                     t, ed = settings.get("terminal_emulator", "wezterm start --"), settings.get("editor", "nano")
                     cmd = selection
                     if cmd.startswith("TERM:"): cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
@@ -121,11 +137,11 @@ def main():
                         cmd = f"xdg-open '{url}'"
                     
                     subprocess.Popen(cmd, shell=True, start_new_session=True)
-                    state["last_path"], state["history"] = current_path, weights
+                    state["last_path"], state["history"] = (current_path, weights)
                     save_json(STATE_PATH, state)
                     return
 
-        state["last_path"], state["history"] = current_path, weights
+        state["last_path"], state["history"] = (current_path, weights)
         save_json(STATE_PATH, state)
 
 if __name__ == "__main__":
