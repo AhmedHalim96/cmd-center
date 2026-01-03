@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 import subprocess, os, json, sys
 
-# --- CONFIGURATION ---
+# --- CONFIG & PATHS ---
 BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
 INTERNAL_MENU = {
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
-    #"🎨 Change Icon": "INTERNAL:CHANGE_ICON",
-    #"✍️ Change Text": "INTERNAL:CHANGE_TEXT",
-    "📝 Edit Config": f"TERM:nvim {CONFIG_PATH}"
+    "🎨 Change Icon": "INTERNAL:CHANGE_ICON",
+    "✍️ Change Text": "INTERNAL:CHANGE_TEXT",
+    "📝 Edit Config": f"TERM:nano {CONFIG_PATH}"
 }
 
 def load_data(path):
@@ -22,9 +22,35 @@ def save_data(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
-def rofi_menu(options, prompt, theme):
+def build_rofi_args(settings):
+    # Location map: 0=center, 1=NW, 2=N, 3=NE, 4=W, 5=E, 6=SW, 7=S, 8=SE
+    loc_map = {
+        "top": 2, "bottom": 7, "left": 8, "right": 5, "center": 0, 
+        "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8
+    }
+    
+    loc_val = loc_map.get(settings.get("location", "center"), 0)
+    width = settings.get("width", 30)
+    lines = settings.get("height", 15)
+    
+    # We use -theme-str to force geometry because flags are often ignored by themes
+    theme_str = f"window {{ width: {width}%; location: {loc_val}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; }}"
+
+    args = [
+        "rofi", "-dmenu", "-i",
+        "-location", str(loc_val),
+        "-theme-str", theme_str
+    ]
+    
+    theme_file = settings.get("theme_file", "")
+    if theme_file and os.path.exists(os.path.expanduser(theme_file)):
+        args += ["-theme", os.path.expanduser(theme_file)]
+        
+    return args
+
+def rofi_menu(options, prompt, args):
     proc = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", prompt, "-theme-str", theme],
+        args + ["-p", prompt],
         input="\n".join(options), text=True, capture_output=True
     )
     return proc.stdout.strip()
@@ -38,19 +64,23 @@ def main():
 
     rem_path = settings.get("remember_last_path", True)
     rem_hist = settings.get("remember_history", True)
-
+    
     current_path = state.get("last_path", []) if rem_path else []
     weights = state.get("history", {}) if rem_hist else {}
 
+    rofi_args = build_rofi_args(settings)
+
     while True:
         in_options = len(current_path) > 0 and current_path[0] == "⚙️ Options"
-        active_menu = INTERNAL_MENU if in_options else menu_data
         
-        try:
-            for step in current_path:
-                if not in_options: active_menu = active_menu[step]
-        except: 
-            current_path = []; active_menu = menu_data
+        if in_options:
+            active_menu = INTERNAL_MENU
+        else:
+            active_menu = menu_data
+            try:
+                for step in current_path: active_menu = active_menu[step]
+            except: 
+                current_path = []; active_menu = menu_data
 
         items = list(active_menu.keys())
         path_str = " > ".join(current_path)
@@ -63,14 +93,11 @@ def main():
         if len(current_path) >= 2: options.insert(0, "🏠 HOME")
         if len(current_path) >= 1: options.insert(0, "⬅️ BACK")
 
-        # --- DYNAMIC PROMPT LOGIC ---
-        icon = settings.get("prompt_icon", "🚀")
-        # Use the custom label if at root, otherwise show the path
-        label = settings.get("prompt_label", "Command Center")
-        display_text = path_str if path_str else label
-        prompt = f" {icon} {display_text} "
+        icon = settings.get("prompt_icon", "⚡")
+        label = settings.get("prompt_label", "MAIN")
+        prompt = f" {icon} {path_str if path_str else label} "
 
-        choice = rofi_menu(options, prompt, settings.get("theme", ""))
+        choice = rofi_menu(options, prompt, rofi_args)
         if not choice: break
 
         if choice == "⬅️ BACK":
@@ -82,30 +109,29 @@ def main():
         else:
             selection = active_menu.get(choice)
             
-            # --- INTERNAL OPTIONS LOGIC ---
+            # --- INTERNAL OPTIONS ---
             if selection == "INTERNAL:CHANGE_ICON":
-                new_icon = rofi_menu([], "New Icon:", settings.get("theme", ""))
+                new_icon = rofi_menu([], "New Icon:", rofi_args)
                 if new_icon:
                     config["settings"]["prompt_icon"] = new_icon
                     save_data(CONFIG_PATH, config)
                 continue
 
             if selection == "INTERNAL:CHANGE_TEXT":
-                new_text = rofi_menu([], "New Root Label:", settings.get("theme", ""))
+                new_text = rofi_menu([], "New Root Label:", rofi_args)
                 if new_text:
                     config["settings"]["prompt_label"] = new_text
                     save_data(CONFIG_PATH, config)
                 continue
 
             if selection == "INTERNAL:CLEAR_HIST":
-                state["history"] = {}
-                weights = {}
+                state["history"] = {}; weights = {}
                 save_data(STATE_PATH, state)
-                subprocess.run(["notify-send", "History Cleared"])
+                subprocess.run(["notify-send", "Command Center", "History Cleared"])
                 current_path = []
                 continue
 
-            # --- EXECUTION ---
+            # --- EXECUTION & WEIGHTING ---
             if not in_options and rem_hist:
                 weights[f"{path_str}:{choice}"] = weights.get(f"{path_str}:{choice}", 0) + 1
             
