@@ -6,17 +6,18 @@ BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
+# --- NAVIGATION & UI STRINGS ---
+ICON_SEARCH  = "🔍 Search Everything"
 ICON_OPTIONS = "🛠️ Menu Settings" 
 ICON_HOME    = "🏠 HOME"
 ICON_BACK    = "⬅️ BACK"
 
-# Define internal tools
 INTERNAL_MENU = {
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
     "🎨 Change Icon": "INTERNAL:CHANGE_ICON",
     "✍️ Change Text": "INTERNAL:CHANGE_TEXT",
     "✏️ Set Editor": "INTERNAL:SET_EDITOR",
-    "📝 Edit Config": f"TERM:nano {CONFIG_PATH}"
+    "📝 Edit Config": f"TERM:nvim {CONFIG_PATH}"
 }
 
 def load_data(path):
@@ -28,12 +29,24 @@ def save_data(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
+def get_flat_menu(menu, prefix=""):
+    """Recursively flattens the menu tree into 'Path > Key': 'Command'"""
+    flat = {}
+    for key, value in menu.items():
+        path = f"{prefix} > {key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(get_flat_menu(value, path))
+        else:
+            flat[path] = value
+    return flat
+
 def build_rofi_args(settings):
     loc_map = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0, "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8}
     loc_val = loc_map.get(settings.get("location", "center"), 0)
     width, lines = settings.get("width", 30), settings.get("height", 12)
     
-    theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; }}"
+    # Force single column and specified geometry via theme-str
+    theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; columns: 1; }}"
     args = ["rofi", "-dmenu", "-i", "-location", str(loc_val), "-theme-str", theme_str]
     
     theme_file = settings.get("theme_file", "")
@@ -41,8 +54,12 @@ def build_rofi_args(settings):
         args += ["-theme", os.path.expanduser(theme_file)]
     return args
 
-def rofi_menu(options, prompt, args):
-    proc = subprocess.run(args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True)
+def rofi_menu(options, prompt, args, filter_query=""):
+    cmd = args + ["-p", prompt]
+    if filter_query:
+        cmd += ["-filter", filter_query]
+    
+    proc = subprocess.run(cmd, input="\n".join(options), text=True, capture_output=True)
     return proc.stdout.strip()
 
 def main():
@@ -57,7 +74,6 @@ def main():
     rofi_args = build_rofi_args(settings)
 
     while True:
-        # Check if we are in the internal settings menu
         in_options = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
         
         if in_options:
@@ -71,15 +87,15 @@ def main():
         items = list(active_menu.keys())
         path_str = " > ".join(current_path)
         
-        # Sort items by weight (except when inside internal settings)
         if rem_hist and not in_options:
             items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
 
         options = items.copy()
         
-        # Navigation injection
+        # --- NAVIGATION INJECTION ---
         if not current_path:
-            options.append(ICON_OPTIONS) 
+            options.insert(0, ICON_SEARCH)  # PINNED TO TOP
+            options.append(ICON_OPTIONS)    # PINNED TO BOTTOM
         
         if len(current_path) >= 2:
             options.insert(0, ICON_HOME)
@@ -89,18 +105,39 @@ def main():
 
         prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else settings.get('prompt_label', 'MAIN')} "
         choice = rofi_menu(options, prompt, rofi_args)
+        
         if not choice: break
 
-        # Handle Navigation Variables
-        if choice == ICON_BACK:
-            current_path.pop()
-        elif choice == ICON_HOME:
-            current_path = []
-        elif choice == ICON_OPTIONS:
-            current_path = [ICON_OPTIONS]
-        else:
-            selection = active_menu.get(choice)
+        # --- SEARCH LOGIC (Unified Search including Settings) ---
+        if choice == ICON_SEARCH or choice.startswith("/"):
+            query = choice[1:].strip() if choice.startswith("/") else ""
             
+            # Combine main menu and internal settings for search
+            flat_map = get_flat_menu(menu_data)
+            for key, value in INTERNAL_MENU.items():
+                flat_map[f"{ICON_OPTIONS} > {key}"] = value
+                
+            search_choice = rofi_menu(list(flat_map.keys()), "🔍 Global Search", rofi_args, filter_query=query)
+            
+            if search_choice in flat_map:
+                selection = flat_map[search_choice]
+                choice = search_choice # Process execution logic
+            else:
+                continue
+
+        # Handle Navigation Variables
+        if choice == ICON_BACK: current_path.pop()
+        elif choice == ICON_HOME: current_path = []
+        elif choice == ICON_OPTIONS: current_path = [ICON_OPTIONS]
+        else:
+            # Determine selection if not already set by search block
+            if 'selection' not in locals() or choice not in get_flat_menu(menu_data):
+                # If we're searching settings, flat_map was temporary, so we check if choice exists there
+                # Otherwise, grab from current active menu
+                selection = active_menu.get(choice)
+            
+            if not selection: continue
+
             # --- INTERNAL LOGIC ---
             if selection == "INTERNAL:SET_EDITOR":
                 new_ed = rofi_menu([], "Enter Editor:", rofi_args)
@@ -123,7 +160,9 @@ def main():
                 continue
 
             # --- EXECUTION & WEIGHTING ---
-            if not in_options and rem_hist:
+            # Don't weight search trigger, search results, or internal options
+            is_search_result = " > " in choice and ICON_OPTIONS not in choice # Rough check for search path
+            if not in_options and rem_hist and choice != ICON_SEARCH and not choice.startswith("/") and not is_search_result:
                 weights[f"{path_str}:{choice}"] = weights.get(f"{path_str}:{choice}", 0) + 1
             
             state["last_path"] = current_path
@@ -149,10 +188,13 @@ def main():
                     cmd = f"{b} '{url}'"
                 
                 subprocess.Popen(cmd, shell=True, start_new_session=True)
+                # Cleanup selection variable for next loop iteration
+                if 'selection' in locals(): del selection
                 return 
 
         state["last_path"] = current_path
         save_data(STATE_PATH, state)
+        if 'selection' in locals(): del selection
 
 if __name__ == "__main__":
     main()
