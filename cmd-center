@@ -10,6 +10,7 @@ INTERNAL_MENU = {
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
     "🎨 Change Icon": "INTERNAL:CHANGE_ICON",
     "✍️ Change Text": "INTERNAL:CHANGE_TEXT",
+    "✏️ Set Editor": "INTERNAL:SET_EDITOR",
     "📝 Edit Config": f"TERM:nano {CONFIG_PATH}"
 }
 
@@ -23,112 +24,81 @@ def save_data(path, data):
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
 def build_rofi_args(settings):
-    # Location map: 0=center, 1=NW, 2=N, 3=NE, 4=W, 5=E, 6=SW, 7=S, 8=SE
-    loc_map = {
-        "top": 2, "bottom": 7, "left": 8, "right": 5, "center": 0, 
-        "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8
-    }
-    
+    loc_map = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0, "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8}
     loc_val = loc_map.get(settings.get("location", "center"), 0)
-    width = settings.get("width", 30)
-    lines = settings.get("height", 15)
+    width, lines = settings.get("width", 30), settings.get("height", 12)
     
-    # We use -theme-str to force geometry because flags are often ignored by themes
-    theme_str = f"window {{ width: {width}%; location: {loc_val}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; }}"
-
-    args = [
-        "rofi", "-dmenu", "-i",
-        "-location", str(loc_val),
-        "-theme-str", theme_str
-    ]
+    theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; }}"
+    args = ["rofi", "-dmenu", "-i", "-location", str(loc_val), "-theme-str", theme_str]
     
     theme_file = settings.get("theme_file", "")
     if theme_file and os.path.exists(os.path.expanduser(theme_file)):
         args += ["-theme", os.path.expanduser(theme_file)]
-        
     return args
 
 def rofi_menu(options, prompt, args):
-    proc = subprocess.run(
-        args + ["-p", prompt],
-        input="\n".join(options), text=True, capture_output=True
-    )
+    proc = subprocess.run(args + ["-p", prompt], input="\n".join(options), text=True, capture_output=True)
     return proc.stdout.strip()
 
 def main():
     config = load_data(CONFIG_PATH)
     state = load_data(STATE_PATH)
-    
     settings = config.get("settings", {})
     menu_data = config.get("menu", {})
 
-    rem_path = settings.get("remember_last_path", True)
-    rem_hist = settings.get("remember_history", True)
-    
+    rem_path, rem_hist = settings.get("remember_last_path", True), settings.get("remember_history", True)
     current_path = state.get("last_path", []) if rem_path else []
     weights = state.get("history", {}) if rem_hist else {}
-
     rofi_args = build_rofi_args(settings)
 
     while True:
         in_options = len(current_path) > 0 and current_path[0] == "⚙️ Options"
-        
-        if in_options:
-            active_menu = INTERNAL_MENU
-        else:
-            active_menu = menu_data
-            try:
-                for step in current_path: active_menu = active_menu[step]
-            except: 
-                current_path = []; active_menu = menu_data
+        active_menu = INTERNAL_MENU if in_options else menu_data
+        try:
+            for step in current_path: active_menu = active_menu[step]
+        except: current_path = []; active_menu = menu_data
 
         items = list(active_menu.keys())
         path_str = " > ".join(current_path)
-        
         if rem_hist and not in_options:
             items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
 
         options = items.copy()
         if not current_path: options.append("⚙️ Options") 
-        if len(current_path) >= 2: options.insert(0, "🏠 HOME")
-        if len(current_path) >= 1: options.insert(0, "⬅️ BACK")
+        if len(current_path) >= 2: options.insert(0, "🏠 HOME"); options.insert(1, "⬅️ BACK")
+        elif len(current_path) == 1: options.insert(0, "⬅️ BACK")
 
-        icon = settings.get("prompt_icon", "⚡")
-        label = settings.get("prompt_label", "MAIN")
-        prompt = f" {icon} {path_str if path_str else label} "
-
+        prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else settings.get('prompt_label', 'MAIN')} "
         choice = rofi_menu(options, prompt, rofi_args)
         if not choice: break
 
-        if choice == "⬅️ BACK":
-            current_path.pop()
-        elif choice == "🏠 HOME":
-            current_path = []
-        elif choice == "⚙️ Options":
-            current_path = ["⚙️ Options"]
+        if choice == "⬅️ BACK": current_path.pop()
+        elif choice == "🏠 HOME": current_path = []
+        elif choice == "⚙️ Options": current_path = ["⚙️ Options"]
         else:
             selection = active_menu.get(choice)
             
             # --- INTERNAL OPTIONS ---
+            if selection == "INTERNAL:SET_EDITOR":
+                new_ed = rofi_menu([], "Enter Editor (e.g. nvim, code, gedit):", rofi_args)
+                if new_ed:
+                    config["settings"]["editor"] = new_ed
+                    save_data(CONFIG_PATH, config)
+                continue
+            
             if selection == "INTERNAL:CHANGE_ICON":
                 new_icon = rofi_menu([], "New Icon:", rofi_args)
-                if new_icon:
-                    config["settings"]["prompt_icon"] = new_icon
-                    save_data(CONFIG_PATH, config)
+                if new_icon: config["settings"]["prompt_icon"] = new_icon; save_data(CONFIG_PATH, config)
                 continue
 
             if selection == "INTERNAL:CHANGE_TEXT":
                 new_text = rofi_menu([], "New Root Label:", rofi_args)
-                if new_text:
-                    config["settings"]["prompt_label"] = new_text
-                    save_data(CONFIG_PATH, config)
+                if new_text: config["settings"]["prompt_label"] = new_text; save_data(CONFIG_PATH, config)
                 continue
 
             if selection == "INTERNAL:CLEAR_HIST":
-                state["history"] = {}; weights = {}
-                save_data(STATE_PATH, state)
-                subprocess.run(["notify-send", "Command Center", "History Cleared"])
-                current_path = []
+                state["history"] = {}; weights = {}; save_data(STATE_PATH, state)
+                subprocess.run(["notify-send", "History Cleared"]); current_path = []
                 continue
 
             # --- EXECUTION & WEIGHTING ---
@@ -143,9 +113,18 @@ def main():
                 current_path.append(choice)
             else:
                 cmd = selection
-                if cmd.startswith("TERM:"):
-                    t = settings.get("terminal_emulator", "wezterm start --")
-                    cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
+                editor = settings.get("editor", "nano")
+                term = settings.get("terminal_emulator", "wezterm start --")
+                
+                if cmd.startswith("EDT:"):
+                    file_path = os.path.expanduser(cmd[4:])
+                    # If editor is a terminal one, wrap it in terminal
+                    if editor in ["nano", "vim", "nvim", "vi"]:
+                        cmd = f"{term} {editor} {file_path}"
+                    else:
+                        cmd = f"{editor} {file_path}"
+                elif cmd.startswith("TERM:"):
+                    cmd = f"{term} bash -c \"{cmd[5:]}; echo; read\""
                 elif cmd.startswith("WEB:"):
                     b = settings.get("browser", "xdg-open")
                     url = cmd[4:] if "://" in cmd[4:] else f"https://{cmd[4:]}"
