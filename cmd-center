@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+import subprocess
+import os
+import json
+import sys
+
+CONFIG_PATH = os.path.expanduser("~/.config/cmd-center/config.json")
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        print(f"Config not found at {CONFIG_PATH}")
+        sys.exit(1)
+    with open(CONFIG_PATH, 'r') as f:
+        return json.load(f)
+
+def rofi_menu(options, prompt, theme_str):
+    input_str = "\n".join(options)
+    proc = subprocess.run(
+        ["rofi", "-dmenu", "-i", "-p", prompt, "-theme-str", theme_str],
+        input=input_str, text=True, capture_output=True
+    )
+    return proc.stdout.strip()
+
+def wrap_terminal(command, terminal_exec):
+    cmd = command.replace("TERM:", "", 1)
+    return f"{terminal_exec} bash -c \"{cmd}; echo; echo 'Task finished. Press Enter to close.'; read\""
+
+def wrap_web(command, browser_exec):
+    url = command.replace("WEB:", "", 1)
+    # Ensure URL starts with http if not present
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return f"{browser_exec} '{url}'"
+
+def main():
+    config = load_config()
+    settings = config.get("settings", {})
+    menu_data = config.get("menu", {})
+    
+    # Defaults
+    theme = settings.get("theme", "window { width: 30%; }")
+    term = settings.get("terminal_emulator", "wezterm start --")
+    browser = settings.get("browser", "xdg-open") # xdg-open is a safe system default
+    icon = settings.get("prompt_icon", "⚡")
+
+    current_path = [] 
+    
+    while True:
+        active_menu = menu_data
+        for folder in current_path:
+            active_menu = active_menu[folder]
+
+        options = list(active_menu.keys())
+        if current_path and settings.get("show_back_button", True):
+            options.insert(0, "⬅️ BACK")
+        
+        prompt_label = f" {icon} " + (" > ".join(current_path) if current_path else "COMMAND CENTER")
+        choice = rofi_menu(options, prompt_label, theme)
+
+        if not choice:
+            break
+
+        if choice == "⬅️ BACK":
+            current_path.pop()
+            continue
+
+        selection = active_menu.get(choice)
+
+        if isinstance(selection, dict):
+            current_path.append(choice)
+        else:
+            # Check for directives
+            if isinstance(selection, str):
+                if selection.startswith("TERM:"):
+                    selection = wrap_terminal(selection, term)
+                elif selection.startswith("WEB:"):
+                    selection = wrap_web(selection, browser)
+            
+            subprocess.Popen(selection, shell=True, start_new_session=True)
+            break
+
+if __name__ == "__main__":
+    main()
