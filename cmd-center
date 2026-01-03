@@ -6,6 +6,11 @@ BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
+ICON_OPTIONS = "🛠️ Menu Settings" 
+ICON_HOME    = "🏠 HOME"
+ICON_BACK    = "⬅️ BACK"
+
+# Define internal tools
 INTERNAL_MENU = {
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
     "🎨 Change Icon": "INTERNAL:CHANGE_ICON",
@@ -52,38 +57,54 @@ def main():
     rofi_args = build_rofi_args(settings)
 
     while True:
-        in_options = len(current_path) > 0 and current_path[0] == "⚙️ Options"
-        active_menu = INTERNAL_MENU if in_options else menu_data
-        try:
-            for step in current_path: active_menu = active_menu[step]
-        except: current_path = []; active_menu = menu_data
+        # Check if we are in the internal settings menu
+        in_options = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
+        
+        if in_options:
+            active_menu = INTERNAL_MENU
+        else:
+            active_menu = menu_data
+            try:
+                for step in current_path: active_menu = active_menu[step]
+            except: current_path = []; active_menu = menu_data
 
         items = list(active_menu.keys())
         path_str = " > ".join(current_path)
+        
+        # Sort items by weight (except when inside internal settings)
         if rem_hist and not in_options:
             items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
 
         options = items.copy()
-        if not current_path: options.append("⚙️ Options") 
-        if len(current_path) >= 2: options.insert(0, "🏠 HOME"); options.insert(1, "⬅️ BACK")
-        elif len(current_path) == 1: options.insert(0, "⬅️ BACK")
+        
+        # Navigation injection
+        if not current_path:
+            options.append(ICON_OPTIONS) 
+        
+        if len(current_path) >= 2:
+            options.insert(0, ICON_HOME)
+            options.insert(1, ICON_BACK)
+        elif len(current_path) == 1:
+            options.insert(0, ICON_BACK)
 
         prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else settings.get('prompt_label', 'MAIN')} "
         choice = rofi_menu(options, prompt, rofi_args)
         if not choice: break
 
-        if choice == "⬅️ BACK": current_path.pop()
-        elif choice == "🏠 HOME": current_path = []
-        elif choice == "⚙️ Options": current_path = ["⚙️ Options"]
+        # Handle Navigation Variables
+        if choice == ICON_BACK:
+            current_path.pop()
+        elif choice == ICON_HOME:
+            current_path = []
+        elif choice == ICON_OPTIONS:
+            current_path = [ICON_OPTIONS]
         else:
             selection = active_menu.get(choice)
             
-            # --- INTERNAL OPTIONS ---
+            # --- INTERNAL LOGIC ---
             if selection == "INTERNAL:SET_EDITOR":
-                new_ed = rofi_menu([], "Enter Editor (e.g. nvim, code, gedit):", rofi_args)
-                if new_ed:
-                    config["settings"]["editor"] = new_ed
-                    save_data(CONFIG_PATH, config)
+                new_ed = rofi_menu([], "Enter Editor:", rofi_args)
+                if new_ed: config["settings"]["editor"] = new_ed; save_data(CONFIG_PATH, config)
                 continue
             
             if selection == "INTERNAL:CHANGE_ICON":
@@ -112,17 +133,14 @@ def main():
             if isinstance(selection, dict):
                 current_path.append(choice)
             else:
+                # Directives Logic
                 cmd = selection
                 editor = settings.get("editor", "nano")
                 term = settings.get("terminal_emulator", "wezterm start --")
                 
                 if cmd.startswith("EDT:"):
                     file_path = os.path.expanduser(cmd[4:])
-                    # If editor is a terminal one, wrap it in terminal
-                    if editor in ["nano", "vim", "nvim", "vi"]:
-                        cmd = f"{term} {editor} {file_path}"
-                    else:
-                        cmd = f"{editor} {file_path}"
+                    cmd = f"{term} {editor} {file_path}" if editor in ["nano", "vim", "nvim", "vi"] else f"{editor} {file_path}"
                 elif cmd.startswith("TERM:"):
                     cmd = f"{term} bash -c \"{cmd[5:]}; echo; read\""
                 elif cmd.startswith("WEB:"):
