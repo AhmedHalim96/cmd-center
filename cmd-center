@@ -1,83 +1,99 @@
 #!/usr/bin/env python3
-import subprocess
-import os
-import json
-import sys
+import subprocess, os, json, sys
 
-CONFIG_PATH = os.path.expanduser("~/.config/cmd-center/config.json")
+BASE_DIR = os.path.expanduser("~/.config/cmd-center")
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        print(f"Config not found at {CONFIG_PATH}")
-        sys.exit(1)
-    with open(CONFIG_PATH, 'r') as f:
-        return json.load(f)
+def load_data(path):
+    if os.path.exists(path):
+        with open(path, 'r') as f: return json.load(f)
+    return {}
 
-def rofi_menu(options, prompt, theme_str):
-    input_str = "\n".join(options)
+def save_data(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f: json.dump(data, f, indent=2)
+
+def rofi_menu(options, prompt, theme):
     proc = subprocess.run(
-        ["rofi", "-dmenu", "-i", "-p", prompt, "-theme-str", theme_str],
-        input=input_str, text=True, capture_output=True
+        ["rofi", "-dmenu", "-i", "-p", prompt, "-theme-str", theme],
+        input="\n".join(options), text=True, capture_output=True
     )
     return proc.stdout.strip()
 
-def wrap_terminal(command, terminal_exec):
-    cmd = command.replace("TERM:", "", 1)
-    return f"{terminal_exec} bash -c \"{cmd}; echo; echo 'Task finished. Press Enter to close.'; read\""
-
-def wrap_web(command, browser_exec):
-    url = command.replace("WEB:", "", 1)
-    # Ensure URL starts with http if not present
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-    return f"{browser_exec} '{url}'"
-
 def main():
-    config = load_config()
+    config = load_data(CONFIG_PATH)
+    state = load_data(STATE_PATH)
+    
     settings = config.get("settings", {})
     menu_data = config.get("menu", {})
-    
-    # Defaults
-    theme = settings.get("theme", "window { width: 30%; }")
-    term = settings.get("terminal_emulator", "wezterm start --")
-    browser = settings.get("browser", "xdg-open") # xdg-open is a safe system default
-    icon = settings.get("prompt_icon", "⚡")
 
-    current_path = [] 
-    
+    rem_path = settings.get("remember_last_path", True)
+    rem_hist = settings.get("remember_history", True)
+
+    current_path = state.get("last_path", []) if rem_path else []
+    weights = state.get("history", {}) if rem_hist else {}
+
     while True:
         active_menu = menu_data
-        for folder in current_path:
-            active_menu = active_menu[folder]
+        try:
+            for step in current_path: active_menu = active_menu[step]
+        except: 
+            current_path = []; active_menu = menu_data
 
-        options = list(active_menu.keys())
-        if current_path and settings.get("show_back_button", True):
-            options.insert(0, "⬅️ BACK")
+        path_str = " > ".join(current_path)
+        items = list(active_menu.keys())
         
-        prompt_label = f" {icon} " + (" > ".join(current_path) if current_path else "COMMAND CENTER")
-        choice = rofi_menu(options, prompt_label, theme)
+        if rem_hist:
+            # Sort by frequency
+            items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
 
-        if not choice:
-            break
+        options = items.copy()
+        if len(current_path) >= 2: options.insert(0, "🏠 HOME")
+        if len(current_path) >= 1: options.insert(0, "⬅️ BACK")
+
+        prompt = f" {settings.get('prompt_icon', '⚡')} " + (path_str if path_str else "MAIN")
+        choice = rofi_menu(options, prompt, settings.get("theme", ""))
+
+        if not choice: break
 
         if choice == "⬅️ BACK":
             current_path.pop()
-            continue
-
-        selection = active_menu.get(choice)
-
-        if isinstance(selection, dict):
-            current_path.append(choice)
+        elif choice == "🏠 HOME":
+            current_path = []
         else:
-            # Check for directives
-            if isinstance(selection, str):
-                if selection.startswith("TERM:"):
-                    selection = wrap_terminal(selection, term)
-                elif selection.startswith("WEB:"):
-                    selection = wrap_web(selection, browser)
+            selection = active_menu.get(choice)
             
-            subprocess.Popen(selection, shell=True, start_new_session=True)
-            break
+            if rem_hist:
+                key = f"{path_str}:{choice}"
+                weights[key] = weights.get(key, 0) + 1
+            
+            # Prepare state to be saved
+            state["last_path"] = current_path
+            state["history"] = weights
+            save_data(STATE_PATH, state)
+
+            if isinstance(selection, dict):
+                current_path.append(choice)
+                continue # Go to next loop to show the sub-menu
+            else:
+                # Execute Command
+                cmd = selection
+                if cmd.startswith("TERM:"):
+                    t = settings.get("terminal_emulator", "wezterm start --")
+                    cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
+                elif cmd.startswith("WEB:"):
+                    b = settings.get("browser", "xdg-open")
+                    url = cmd[4:] if "://" in cmd[4:] else f"https://{cmd[4:]}"
+                    cmd = f"{b} '{url}'"
+                
+                subprocess.Popen(cmd, shell=True, start_new_session=True)
+                return # Successfully exit the script
+
+        # Save state if we navigated (Back/Home)
+        state["last_path"] = current_path
+        state["history"] = weights
+        save_data(STATE_PATH, state)
 
 if __name__ == "__main__":
     main()
