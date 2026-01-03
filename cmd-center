@@ -28,10 +28,13 @@ def save_json(path, data):
 
 def get_system_apps():
     apps = {}
-    paths = ["/usr/share/applications/*.desktop", "/usr/local/share/applications/*.desktop", 
-"~/.local/share/flatpak/exports/share/applications/*.desktop",
-"/var/lib/flatpak/exports/share/applications/*.desktop",
-    os.path.expanduser("~/.local/share/applications/*.desktop")]
+    # Comprehensive list of paths including Flatpak exports
+    paths = [
+        "/usr/share/applications/*.desktop", 
+        os.path.expanduser("~/.local/share/applications/*.desktop"),
+        "/var/lib/flatpak/exports/share/applications/*.desktop",
+        os.path.expanduser("~/.local/share/flatpak/exports/share/applications/*.desktop")
+    ]
     for path_glob in paths:
         for entry in glob.glob(path_glob):
             try:
@@ -64,7 +67,7 @@ def build_rofi_args(settings):
     loc_map = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0, "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8}
     loc_val = loc_map.get(settings.get("location", "center"), 0)
     width, lines = settings.get("width", 30), settings.get("height", 12)
-    # Icons are enabled globally, but we only send icon data in the Apps sub-menu
+    # HARDCODED: columnds 1 for a clean vertical list
     theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; columns: 1; }}"
     return ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str]
 
@@ -99,7 +102,7 @@ def main():
         rofi_list = []
 
         if not current_path:
-            # --- HOME SCREEN (NO ICONS) ---
+            # --- HOME SCREEN (No Icons) ---
             categories = list(menu_data.keys())
             if settings.get("remember_history", True):
                 categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
@@ -123,16 +126,16 @@ def main():
             rofi_list.extend(global_items)
             options_dict = {**menu_data, **combined_pool}
         else:
-            # --- SUB-MENU (ICONS ONLY IF IN APPS) ---
+            # --- SUB-MENU (Icons only in Apps) ---
             rofi_list.append(ICON_BACK)
             if len(current_path) >= 2: rofi_list.append(ICON_HOME)
             
             items = list(active_menu.keys())
             if in_apps:
+                # Weighted sort for apps
                 items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
                 for item in items:
                     icon = active_menu[item].get("icon", "system-run")
-                    # SEND ICON DATA HERE
                     rofi_list.append(f"{item}\0icon\x1f{icon}")
             else:
                 if not in_options and settings.get("remember_history", True):
@@ -157,6 +160,7 @@ def main():
             if isinstance(selection, dict) and "cmd" not in selection:
                 current_path.append(choice)
             else:
+                # EXECUTION logic
                 is_app = choice.endswith(f"({ICON_APPS})") or in_apps
                 app_name = choice.split("    (")[0] if is_app else choice
                 cmd = selection["cmd"] if is_app else selection
