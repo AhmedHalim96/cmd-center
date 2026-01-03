@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 import subprocess, os, json, sys
 
+# --- CONFIGURATION & INTERNAL MENU ---
 BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
+
+# Define internal tools here for easy access
+INTERNAL_MENU = {
+    "🧹 Clear History": "INTERNAL:CLEAR_HIST",
+    "📝 Edit Config": f"TERM:nano {CONFIG_PATH}" # Opens config in terminal editor
+}
 
 def load_data(path):
     if os.path.exists(path):
@@ -35,49 +42,72 @@ def main():
     weights = state.get("history", {}) if rem_hist else {}
 
     while True:
-        active_menu = menu_data
-        try:
-            for step in current_path: active_menu = active_menu[step]
-        except: 
-            current_path = []; active_menu = menu_data
-
-        path_str = " > ".join(current_path)
-        items = list(active_menu.keys())
+        # Determine if we are navigating the internal options
+        in_options = len(current_path) > 0 and current_path[0] == "⚙️ Options"
         
-        if rem_hist:
-            # Sort by frequency
+        if in_options:
+            active_menu = INTERNAL_MENU
+        else:
+            active_menu = menu_data
+            try:
+                for step in current_path: active_menu = active_menu[step]
+            except: 
+                current_path = []; active_menu = menu_data
+
+        # 1. Prepare and Sort Items
+        items = list(active_menu.keys())
+        path_str = " > ".join(current_path)
+        
+        if rem_hist and not in_options:
             items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
 
         options = items.copy()
+        
+        # Keep Options at the very bottom of the main menu
+        if not current_path:
+            options.append("⚙️ Options") 
+        
         if len(current_path) >= 2: options.insert(0, "🏠 HOME")
         if len(current_path) >= 1: options.insert(0, "⬅️ BACK")
 
+        # 2. Show UI
         prompt = f" {settings.get('prompt_icon', '⚡')} " + (path_str if path_str else "MAIN")
         choice = rofi_menu(options, prompt, settings.get("theme", ""))
 
         if not choice: break
 
+        # 3. Handle Navigation
         if choice == "⬅️ BACK":
             current_path.pop()
         elif choice == "🏠 HOME":
             current_path = []
+        elif choice == "⚙️ Options":
+            current_path = ["⚙️ Options"]
         else:
             selection = active_menu.get(choice)
             
-            if rem_hist:
-                key = f"{path_str}:{choice}"
-                weights[key] = weights.get(key, 0) + 1
+            # 4. Handle Internal Logic
+            if selection == "INTERNAL:CLEAR_HIST":
+                weights = {}
+                state["history"] = {}
+                save_data(STATE_PATH, state)
+                subprocess.run(["notify-send", "Command Center", "History Cleared!"])
+                current_path = []
+                continue
+
+            # 5. Regular Selection Logic
+            if not in_options and rem_hist:
+                weights[f"{path_str}:{choice}"] = weights.get(f"{path_str}:{choice}", 0) + 1
             
-            # Prepare state to be saved
             state["last_path"] = current_path
             state["history"] = weights
             save_data(STATE_PATH, state)
 
             if isinstance(selection, dict):
                 current_path.append(choice)
-                continue # Go to next loop to show the sub-menu
+                continue 
             else:
-                # Execute Command
+                # 6. Execution Logic
                 cmd = selection
                 if cmd.startswith("TERM:"):
                     t = settings.get("terminal_emulator", "wezterm start --")
@@ -88,9 +118,9 @@ def main():
                     cmd = f"{b} '{url}'"
                 
                 subprocess.Popen(cmd, shell=True, start_new_session=True)
-                return # Successfully exit the script
+                return 
 
-        # Save state if we navigated (Back/Home)
+        # Final state save for navigation
         state["last_path"] = current_path
         state["history"] = weights
         save_data(STATE_PATH, state)
