@@ -28,7 +28,10 @@ def save_json(path, data):
 
 def get_system_apps():
     apps = {}
-    paths = ["/usr/share/applications/*.desktop", os.path.expanduser("~/.local/share/applications/*.desktop")]
+    paths = ["/usr/share/applications/*.desktop", "/usr/local/share/applications/*.desktop", 
+"~/.local/share/flatpak/exports/share/applications/*.desktop",
+"/var/lib/flatpak/exports/share/applications/*.desktop",
+    os.path.expanduser("~/.local/share/applications/*.desktop")]
     for path_glob in paths:
         for entry in glob.glob(path_glob):
             try:
@@ -58,21 +61,12 @@ def get_flat_menu(menu, prefix=""):
     return flat
 
 def build_rofi_args(settings):
-    # Map friendly names to Rofi location codes
     loc_map = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0, "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8}
     loc_val = loc_map.get(settings.get("location", "center"), 0)
-    width = settings.get("width", 30)
-    lines = settings.get("height", 12)
-    
-    # HARDCODED: columns 1 for a clean vertical list
+    width, lines = settings.get("width", 30), settings.get("height", 12)
+    # Icons are enabled globally, but we only send icon data in the Apps sub-menu
     theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; columns: 1; }}"
-    
-    args = ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str]
-    
-    theme_file = settings.get("theme_file", "")
-    if theme_file and os.path.exists(os.path.expanduser(theme_file)):
-        args += ["-theme", os.path.expanduser(theme_file)]
-    return args
+    return ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str]
 
 def main():
     config = load_json(CONFIG_PATH)
@@ -88,9 +82,10 @@ def main():
         in_options = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
         in_apps = len(current_path) > 0 and current_path[0] == ICON_APPS
         
+        system_apps = get_system_apps()
         active_menu = menu_data
         if in_options: active_menu = INTERNAL_MENU
-        elif in_apps: active_menu = get_system_apps()
+        elif in_apps: active_menu = system_apps
         
         try:
             start_depth = 1 if (in_options or in_apps) else 0
@@ -104,38 +99,41 @@ def main():
         rofi_list = []
 
         if not current_path:
-            # HOME SCREEN logic
+            # --- HOME SCREEN (NO ICONS) ---
             categories = list(menu_data.keys())
             if settings.get("remember_history", True):
                 categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
-            
-            rofi_list.extend(categories + [ICON_APPS, ICON_OPTIONS, SEP_LINE])
-            
+            rofi_list.extend(categories)
+            rofi_list.extend([ICON_APPS, ICON_OPTIONS, SEP_LINE])
+
             flat_user = get_flat_menu(menu_data)
             for k, v in INTERNAL_MENU.items(): flat_user[f"{k}    ({ICON_OPTIONS})"] = v
+            app_pool = {f"{name}    ({ICON_APPS})": data for name, data in system_apps.items()}
+            combined_pool = {**flat_user, **app_pool}
             
-            global_items = list(flat_user.keys())
+            global_items = list(combined_pool.keys())
             if settings.get("remember_history", True):
-                global_items.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
-            
+                def sort_key(x):
+                    if x.endswith(f"({ICON_APPS})"):
+                        app_name = x.split("    (")[0]
+                        return weights.get(f"APP:{app_name}", 0)
+                    return weights.get(f"HOME:{x}", 0)
+                global_items.sort(key=sort_key, reverse=True)
+
             rofi_list.extend(global_items)
-            options_dict = {**menu_data, **flat_user}
+            options_dict = {**menu_data, **combined_pool}
         else:
-            # SUB-MENU view logic
+            # --- SUB-MENU (ICONS ONLY IF IN APPS) ---
             rofi_list.append(ICON_BACK)
             if len(current_path) >= 2: rofi_list.append(ICON_HOME)
             
             items = list(active_menu.keys())
             if in_apps:
-                # Sort Apps by weight, then alphabetically
-                items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower() if weights.get(f"APP:{x}", 0) == 0 else ""), reverse=True)
-                unweighted = sorted([i for i in items if weights.get(f"APP:{i}", 0) == 0])
-                weighted = sorted([i for i in items if weights.get(f"APP:{i}", 0) > 0], key=lambda x: weights.get(f"APP:{x}", 0), reverse=True)
-                items = weighted + unweighted
-
+                items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
                 for item in items:
-                    icon_name = active_menu[item].get("icon", "system-run")
-                    rofi_list.append(f"{item}\0icon\x1f{icon_name}")
+                    icon = active_menu[item].get("icon", "system-run")
+                    # SEND ICON DATA HERE
+                    rofi_list.append(f"{item}\0icon\x1f{icon}")
             else:
                 if not in_options and settings.get("remember_history", True):
                     items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
@@ -156,14 +154,15 @@ def main():
             selection = options_dict.get(choice) if not current_path else active_menu.get(choice)
             if selection is None: continue
 
-            if isinstance(selection, dict) and not in_apps:
+            if isinstance(selection, dict) and "cmd" not in selection:
                 current_path.append(choice)
             else:
-                # EXECUTION and WEIGHTING
-                cmd = selection["cmd"] if in_apps else selection
+                is_app = choice.endswith(f"({ICON_APPS})") or in_apps
+                app_name = choice.split("    (")[0] if is_app else choice
+                cmd = selection["cmd"] if is_app else selection
                 
                 if settings.get("remember_history", True):
-                    w_key = f"APP:{choice}" if in_apps else (f"HOME:{choice}" if not current_path else f"{path_str}:{choice}")
+                    w_key = f"APP:{app_name}" if is_app else (f"HOME:{choice}" if not current_path else f"{path_str}:{choice}")
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
                 if cmd == "INTERNAL:CLEAR_HIST":
