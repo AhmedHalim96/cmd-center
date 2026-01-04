@@ -12,15 +12,7 @@ ICON_RUN     = "🚀 Run"
 ICON_HOME    = "🏠 HOME"
 ICON_BACK    = "⬅️ BACK"
 SEP_LINE     = "────────────────────────────────────────"
-
 RUN_ITEM_ICON = "utilities-terminal" 
-
-INTERNAL_MENU = {
-    "🧹 Clear History": "INTERNAL:CLEAR_HIST",
-    "📝 Edit Config": f"TERM:nvim {CONFIG_PATH}"
-}
-
-# --- HELPER FUNCTIONS ---
 
 def load_json(path):
     if os.path.exists(path):
@@ -33,21 +25,9 @@ def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as f: json.dump(data, f, indent=2)
 
-def get_system_binaries():
-    bins = set()
-    for path in os.environ.get("PATH", "").split(os.pathsep):
-        if os.path.isdir(path):
-            try:
-                for entry in os.scandir(path):
-                    if entry.is_file() and os.access(entry.path, os.X_OK):
-                        bins.add(entry.name)
-            except: continue
-    return sorted(list(bins))
-
 def get_system_apps():
     apps = {}
-    paths = ["/usr/share/applications/*.desktop", os.path.expanduser("~/.local/share/applications/*.desktop"),
-             "/var/lib/flatpak/exports/share/applications/*.desktop", os.path.expanduser("~/.local/share/flatpak/exports/share/applications/*.desktop")]
+    paths = ["/usr/share/applications/*.desktop", os.path.expanduser("~/.local/share/applications/*.desktop")]
     for path_glob in paths:
         for entry in glob.glob(path_glob):
             try:
@@ -61,139 +41,116 @@ def get_system_apps():
             except: continue
     return apps
 
-def get_flat_menu(menu, prefix=""):
-    flat = {}
-    for key, value in menu.items():
-        if isinstance(value, dict):
-            new_prefix = f"{prefix} > {key}" if prefix else key
-            flat.update(get_flat_menu(value, new_prefix))
-        else:
-            display_key = f"{key}    ({prefix})" if prefix else key
-            flat[display_key] = value
-    return flat
-
-def build_rofi_args(settings):
+def build_rofi_args(settings, filter_text=None):
     loc_val = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0}.get(settings.get("location", "center"), 0)
     width, lines = settings.get("width", 30), settings.get("height", 12)
     theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; }} listview {{ lines: {lines}; columns: 1; }}"
-    return ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str]
-
-# --- MAIN ---
+    args = ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str, "-kb-custom-1", "Alt+Return"]
+    if filter_text: args += ["-filter", filter_text]
+    return args
 
 def main():
     config = load_json(CONFIG_PATH)
     state = load_json(STATE_PATH)
     settings = config.get("settings", {})
     menu_data = config.get("menu", {})
-    weights = state.get("history", {}) if settings.get("remember_history", True) else {}
+    weights = state.get("history", {})
     current_path = state.get("last_path", []) if settings.get("remember_last_path", True) else []
-    rofi_args = build_rofi_args(settings)
-
+    
     while True:
+        rofi_args = build_rofi_args(settings)
         in_run = len(current_path) > 0 and current_path[0] == ICON_RUN
         in_apps = len(current_path) > 0 and current_path[0] == ICON_APPS
-        in_opts = len(current_path) > 0 and current_path[0] == ICON_OPTIONS
-
         system_apps = get_system_apps()
         
-        # Navigation logic
-        if in_opts: active_menu = INTERNAL_MENU
+        # Build current view
+        if len(current_path) > 0 and current_path[0] == ICON_OPTIONS: 
+            active_menu = {"🧹 Clear History": "INTERNAL:CLEAR_HIST", "📝 Edit Config": f"TERM:nvim {CONFIG_PATH}"}
         elif in_apps: active_menu = system_apps
         elif in_run:
-            run_hist = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
-            active_menu = {**{b: b for b in get_system_binaries()}, **run_hist}
+            active_menu = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
         else: active_menu = menu_data
 
         try:
-            depth = 1 if (in_opts or in_apps or in_run) else 0
-            for i in range(depth, len(current_path)):
-                active_menu = active_menu[current_path[i]]
-        except:
-            current_path = []; active_menu = menu_data
+            depth = 1 if (in_run or in_apps or (len(current_path) > 0 and current_path[0] == ICON_OPTIONS)) else 0
+            for i in range(depth, len(current_path)): active_menu = active_menu[current_path[i]]
+        except: current_path = []; active_menu = menu_data
 
-        path_str = " > ".join(current_path)
         rofi_list = []
         options_dict = {}
-
         if not current_path:
-            # --- HOME SCREEN GLOBAL SEARCH ---
             categories = list(menu_data.keys())
-            if settings.get("remember_history", True):
-                categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
-            
+            categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             rofi_list.extend(categories + [ICON_RUN, ICON_APPS, ICON_OPTIONS, SEP_LINE])
-
-            # Prepare global pools
-            flat_user = get_flat_menu(menu_data)
-            for k, v in INTERNAL_MENU.items(): flat_user[f"{k}    ({ICON_OPTIONS})"] = v
             
+            # Global items
+            run_pool = {f"{k.split('RUN:')[1]}    ({ICON_RUN})": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
             app_pool = {f"{n}    ({ICON_APPS})": d for n, d in system_apps.items()}
             
-            # NEW: Add typed Run commands to global search
-            run_pool = {f"{k.split('RUN:')[1]}    ({ICON_RUN})": k.split('RUN:')[1] 
-                        for k in weights.keys() if k.startswith("RUN:")}
-
-            combined_pool = {**flat_user, **app_pool, **run_pool}
-            
+            combined_pool = {**app_pool, **run_pool}
             global_items = list(combined_pool.keys())
-            if settings.get("remember_history", True):
-                def global_sort(x):
-                    if x.endswith(f"({ICON_APPS})"): return weights.get(f"APP:{x.split('    (')[0]}", 0)
-                    if x.endswith(f"({ICON_RUN})"): return weights.get(f"RUN:{x.split('    (')[0]}", 0)
-                    return weights.get(f"HOME:{x}", 0)
-                global_items.sort(key=global_sort, reverse=True)
-            
+            global_items.sort(key=lambda x: weights.get(f"RUN:{x.split('    (')[0]}" if f"({ICON_RUN})" in x else f"APP:{x.split('    (')[0]}", 0), reverse=True)
             rofi_list.extend(global_items)
-            options_dict = {**menu_data, **combined_pool}
+            options_dict = combined_pool
         else:
-            # --- SUB-MENU ---
             rofi_list.append(ICON_BACK)
-            if len(current_path) >= 2: rofi_list.append(ICON_HOME)
-            
             items = list(active_menu.keys())
             if in_apps:
-                items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
+                items.sort(key=lambda x: weights.get(f"APP:{x}", 0), reverse=True)
                 for item in items: rofi_list.append(f"{item}\0icon\x1f{active_menu[item].get('icon', 'system-run')}")
-            elif in_run:
-                items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
-                for item in items: rofi_list.append(f"{item}\0icon\x1f{RUN_ITEM_ICON}")
             else:
-                if not in_opts and settings.get("remember_history", True):
-                    items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
+                items.sort(key=lambda x: weights.get(f"{' > '.join(current_path)}:{x}", 0), reverse=True)
                 rofi_list.extend(items)
 
-        prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else 'HUB'} "
+        prompt = f" {settings.get('prompt_icon', '⚡')} {' > '.join(current_path) if current_path else 'HUB'} "
         proc = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(rofi_list), text=True, capture_output=True)
-        choice = proc.stdout.strip()
+        choice, ret = proc.stdout.strip(), proc.returncode
+        
+        if not choice: break
 
-        if not choice or choice == SEP_LINE:
-            if not choice: break
-            continue
+        # --- SUB-MENU LOGIC (Triggered by Alt+Enter OR normal select on Run items) ---
+        is_run_item = f"({ICON_RUN})" in choice or in_run
+        
+        if ret == 10 and is_run_item:
+            clean_cmd = choice.split("    (")[0] if "    (" in choice else choice
+            action_list = ["🚀 Run Now", "📝 Edit & Run", "🗑️ Delete from History", ICON_BACK]
+            sub_proc = subprocess.run(build_rofi_args(settings) + ["-p", f"Action: {clean_cmd}"], 
+                                      input="\n".join(action_list), text=True, capture_output=True)
+            action = sub_proc.stdout.strip()
+            
+            if action == "🚀 Run Now":
+                choice = clean_cmd
+            elif action == "📝 Edit & Run":
+                edit_proc = subprocess.run(build_rofi_args(settings, filter_text=clean_cmd) + ["-p", "Edit:"], 
+                                           input="", text=True, capture_output=True)
+                choice = edit_proc.stdout.strip()
+                if not choice: continue
+            elif action == "🗑️ Delete from History":
+                keys_to_del = [k for k in weights if clean_cmd == k.split(":", 1)[-1]]
+                for k in keys_to_del: weights.pop(k, None)
+                save_json(STATE_PATH, {"last_path": current_path, "history": weights})
+                continue
+            else:
+                continue
 
+        # --- EXECUTION LOGIC ---
         if choice == ICON_BACK: current_path.pop()
-        elif choice == ICON_HOME: current_path = []
         elif choice in [ICON_OPTIONS, ICON_APPS, ICON_RUN]: current_path = [choice]
         else:
             selection = options_dict.get(choice) if not current_path else active_menu.get(choice)
-            if selection is None and in_run: selection = choice
-
-            if selection is None: continue
-
+            if selection is None: selection = choice # For edited commands
+            
             if isinstance(selection, dict) and "cmd" not in selection:
                 current_path.append(choice)
             else:
-                # EXECUTION & WEIGHTING
-                is_app = "    (" + ICON_APPS in choice or in_apps
-                is_run = "    (" + ICON_RUN in choice or in_run
-                
+                is_app = f"({ICON_APPS})" in choice or in_apps
+                is_run = f"({ICON_RUN})" in choice or in_run or (selection == choice)
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
                 cmd = selection["cmd"] if (is_app and isinstance(selection, dict)) else selection
                 
-                if settings.get("remember_history", True):
-                    if is_run: w_key = f"RUN:{label}"
-                    elif is_app: w_key = f"APP:{label}"
-                    else: w_key = f"HOME:{choice}" if not current_path else f"{path_str}:{choice}"
-                    weights[w_key] = weights.get(w_key, 0) + 1
+                # Weighting
+                w_key = f"RUN:{label}" if is_run else (f"APP:{label}" if is_app else f"HOME:{choice}")
+                weights[w_key] = weights.get(w_key, 0) + 1
                 
                 if cmd == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; weights = {}; current_path = []
@@ -202,7 +159,6 @@ def main():
                     if cmd.startswith("TERM:"): cmd = f"{t} bash -c \"{cmd[5:]}; echo; read\""
                     elif cmd.startswith("EDT:"): cmd = f"{t} {settings.get('editor', 'nano')} {os.path.expanduser(cmd[4:])}"
                     elif cmd.startswith("WEB:"): cmd = f"xdg-open '{cmd[4:] if '://' in cmd[4:] else 'https://' + cmd[4:]}'"
-                    
                     subprocess.Popen(cmd, shell=True, start_new_session=True)
                     state["last_path"], state["history"] = (current_path, weights)
                     save_json(STATE_PATH, state); return
