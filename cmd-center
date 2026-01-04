@@ -13,7 +13,6 @@ ICON_HOME    = "🏠 HOME"
 ICON_BACK    = "⬅️ BACK"
 SEP_LINE     = "────────────────────────────────────────"
 
-# The icon for items inside the Run menu
 RUN_ITEM_ICON = "utilities-terminal" 
 
 INTERNAL_MENU = {
@@ -81,7 +80,6 @@ def build_rofi_args(settings):
     loc_map = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0, "top-left": 1, "top-right": 3, "bottom-left": 6, "bottom-right": 8}
     loc_val = loc_map.get(settings.get("location", "center"), 0)
     width, lines = settings.get("width", 30), settings.get("height", 12)
-    # Hardcoded columns 1 for scannability
     theme_str = f"window {{ width: {width}%; location: {settings.get('location', 'center')}; x-offset: {settings.get('x_offset', 0)}; y-offset: {settings.get('y_offset', 0)}; }} listview {{ lines: {lines}; columns: 1; }}"
     return ["rofi", "-dmenu", "-i", "-show-icons", "-location", str(loc_val), "-theme-str", theme_str]
 
@@ -123,7 +121,6 @@ def main():
         rofi_list = []
 
         if not current_path:
-            # Home View: Structured Categories + Weighted Global Search
             categories = list(menu_data.keys())
             if settings.get("remember_history", True):
                 categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
@@ -143,7 +140,6 @@ def main():
             rofi_list.extend(global_items)
             options_dict = {**menu_data, **combined_pool}
         else:
-            # Sub-Menu View
             rofi_list.append(ICON_BACK)
             if len(current_path) >= 2: rofi_list.append(ICON_HOME)
             
@@ -175,14 +171,13 @@ def main():
         elif choice in [ICON_OPTIONS, ICON_APPS, ICON_RUN]: current_path = [choice]
         else:
             selection = options_dict.get(choice) if not current_path else active_menu.get(choice)
-            if selection is None and in_run: selection = choice # Run-mode fallback
+            if selection is None and in_run: selection = choice
 
             if selection is None: continue
 
             if isinstance(selection, dict) and "cmd" not in selection:
                 current_path.append(choice)
             else:
-                # EXECUTION
                 is_app = choice.endswith(f"({ICON_APPS})") or in_apps
                 app_name = choice.split("    (")[0] if is_app else choice
                 cmd = selection["cmd"] if is_app else selection
