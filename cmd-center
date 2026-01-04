@@ -6,6 +6,13 @@ BASE_DIR = os.path.expanduser("~/.config/cmd-center")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
+# Colors for Terminal Help
+C_BLUE = "\033[94m"
+C_GREEN = "\033[92m"
+C_YELLOW = "\033[93m"
+C_RESET = "\033[0m"
+C_BOLD = "\033[1m"
+
 ICON_OPTIONS = "🛠️ Menu Settings" 
 ICON_APPS    = "📱 Applications"
 ICON_RUN     = "🚀 Run"
@@ -45,7 +52,6 @@ def get_system_binaries():
 
 def get_system_apps():
     apps = {}
-    # Including global and local paths + flatpak exports
     paths = ["/usr/share/applications/*.desktop", 
              os.path.expanduser("~/.local/share/applications/*.desktop"),
              "/var/lib/flatpak/exports/share/applications/*.desktop",
@@ -59,7 +65,6 @@ def get_system_apps():
                     for line in f:
                         if line.startswith("Name="): name = line.split("=")[1].strip()
                         elif line.startswith("Icon="): icon = line.split("=")[1].strip()
-                    # FIX: Use gtk-launch for desktop files to handle flatpaks/args correctly
                     if name: apps[name] = {"cmd": f"gtk-launch {d_id}", "icon": icon}
             except: continue
     return apps
@@ -84,9 +89,25 @@ def build_rofi_args(settings):
 # --- MAIN ---
 
 def main():
-    # --- TERMINAL HELP SYSTEM ---
-    parser = argparse.ArgumentParser(description="CMD-Center: Unified Rofi Launcher")
-    parser.add_argument('mode', nargs='?', choices=['apps', 'run', 'options'], help="Jump directly to a specific menu")
+    # --- COLORFUL CLI PARSER ---
+    usage_msg = f"""
+{C_BOLD}{C_BLUE}CMD-Center Launcher{C_RESET}
+{C_YELLOW}Usage:{C_RESET} python3 cmd-center.py [{C_GREEN}mode{C_RESET}]
+
+{C_BOLD}Available Modes:{C_RESET}
+  {C_GREEN}apps{C_RESET}      Jump to the {C_BOLD}Applications{C_RESET} list
+  {C_GREEN}run{C_RESET}       Jump to the {C_BOLD}Binary Runner / History{C_RESET}
+  {C_GREEN}options{C_RESET}   Jump to {C_BOLD}Menu Settings{C_RESET}
+  {C_GREEN}(none){C_RESET}    Open the standard {C_BOLD}HUB{C_RESET} view
+    """
+
+    parser = argparse.ArgumentParser(description="CMD-Center: Unified Rofi Launcher", usage=argparse.SUPPRESS)
+    parser.add_argument('mode', nargs='?', choices=['apps', 'run', 'options'])
+    
+    if len(sys.argv) > 1 and sys.argv[1] in ["-h", "--help"]:
+        print(usage_msg)
+        sys.exit(0)
+
     args = parser.parse_args()
 
     config = load_json(CONFIG_PATH)
@@ -110,7 +131,6 @@ def main():
 
         system_apps = get_system_apps()
         
-        # Resolve active_menu
         if in_opts: active_menu = INTERNAL_MENU
         elif in_apps: active_menu = system_apps
         elif in_run:
@@ -129,7 +149,6 @@ def main():
         rofi_list, options_dict = [], {}
 
         if not current_path:
-            # --- HUB VIEW ---
             categories = list(menu_data.keys())
             categories.sort(key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             rofi_list.extend(categories + [ICON_RUN, ICON_APPS, ICON_OPTIONS, SEP_LINE])
@@ -148,11 +167,8 @@ def main():
             global_items.sort(key=global_sort, reverse=True)
             
             rofi_list.extend(global_items)
-            
-            # FIX: Prioritize categories in the mapping so they don't flatten into commands
             options_dict = {**combined_pool, **menu_data}
         else:
-            # --- SUB-MENU ---
             rofi_list.append(ICON_BACK)
             if len(current_path) >= 2: rofi_list.append(ICON_HOME)
             
@@ -164,7 +180,8 @@ def main():
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
                 for item in items: rofi_list.append(f"{item}\0icon\x1f{RUN_ITEM_ICON}")
             else:
-                items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
+                if not in_opts and settings.get("remember_history", True):
+                    items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
                 rofi_list.extend(items)
 
         prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else 'HUB'} "
@@ -183,11 +200,9 @@ def main():
             if selection is None and in_run: selection = choice
             if selection is None: continue
 
-            # Navigation Check
             if isinstance(selection, dict) and "cmd" not in selection:
                 current_path.append(choice)
             else:
-                # EXECUTION
                 is_app = "    (" + ICON_APPS in choice or in_apps
                 is_run = "    (" + ICON_RUN in choice or in_run
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
