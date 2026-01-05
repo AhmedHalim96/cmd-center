@@ -17,5 +17,5 @@ A modular, intelligent unified launcher for Linux using Rofi.
 
 ## 🐛 Bugs
 
-- run history don't work
+- ~~run history don't work~~
 - icons get ignored
