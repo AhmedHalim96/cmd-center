@@ -14,3 +14,8 @@ A modular, intelligent unified launcher for Linux using Rofi.
 1. Save the scripts into a folder.
 2. Run `chmod +x install.sh && ./install.sh`.
 3. Launch with `cmd-center`.
+
+## 🐛 Bugs
+
+- run history don't work
+- icons get ignored
