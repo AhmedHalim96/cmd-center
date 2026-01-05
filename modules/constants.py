@@ -2,15 +2,25 @@ from modules import config
 
 # --- UI VISUALS ---
 ICONS = {
-    "opts": "🛠️ Menu Settings",
-    "apps": "📱 Applications",
-    "run": "🚀 Run",
-    "back": "⬅️ BACK",
-    "home": "🏠 HOME"
+    "opts": "Menu Settings",
+    "apps": "Applications",
+    "run": "Run",
+    "back": "BACK",
+    "home": "HOME"
 }
 
-SEP_LINE = "────────────────────────────────────────"
+# Icon names for Rofi's -show-icons mode
+NAV_ICONS = {
+    ICONS["back"]: "go-previous",
+    ICONS["home"]: "go-home",
+    ICONS["opts"]: "emblem-system",
+    ICONS["apps"]: "applications-all",
+    ICONS["run"]: "run"
+}
+
+FOLDER_ICON = "folder"
 RUN_ICON = "utilities-terminal"
+SEP_LINE = "────────────────────────────────────────"
 
 # --- INTERNAL ACTIONS ---
 INTERNAL_MENU = {
@@ -18,7 +28,7 @@ INTERNAL_MENU = {
     "📝 Edit Config": f"TERM:nvim {config.CONFIG_PATH}"
 }
 
-# --- CLI HELP TEXT ---
+# --- HELP TEXT ---
 def get_help_text(c):
     return (
         f"{c['bold']}{c['blue']}CMD-Center Launcher{c['reset']}\n"

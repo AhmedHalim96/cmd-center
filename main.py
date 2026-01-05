@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import subprocess, os, sys, argparse
 from modules import config, scanner, engine
-from modules.constants import ICONS, SEP_LINE, RUN_ICON, INTERNAL_MENU, get_help_text
+from modules.constants import (
+    ICONS, NAV_ICONS, SEP_LINE, RUN_ICON, 
+    FOLDER_ICON, INTERNAL_MENU, get_help_text
+)
 
 def main():
     # 1. Setup & Data Loading
@@ -61,8 +64,17 @@ def main():
         if not current_path:
             # --- HUB VIEW ---
             categories = sorted(menu_data.keys(), key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
-            rofi_list.extend(categories + [ICONS["run"], ICONS["apps"], ICONS["opts"], SEP_LINE])
+            for cat in categories:
+                cat_val = menu_data[cat]
+                icon = cat_val.get("icon", FOLDER_ICON) if isinstance(cat_val, dict) else FOLDER_ICON
+                rofi_list.append(f"{cat}\0icon\x1f{icon}")
+            
+            for mode in [ICONS["run"], ICONS["apps"], ICONS["opts"]]:
+                rofi_list.append(f"{mode}\0icon\x1f{NAV_ICONS.get(mode, 'system-run')}")
 
+            rofi_list.append(SEP_LINE)
+
+            # Global Search Pool
             flat_user = engine.get_flat_menu(menu_data)
             flat_internal = engine.get_flat_menu(INTERNAL_MENU, prefix=ICONS["opts"])
             app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d['icon']}": d for n, d in scanner.get_system_apps().items()}
@@ -77,13 +89,16 @@ def main():
                 return weights.get(f"HOME:{clean_name}", 0)
             
             rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
+
+            # Lookup mapping for Hub
             for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
             for cat in menu_data: options_dict[cat] = cat
             for mode_icon in [ICONS["run"], ICONS["apps"], ICONS["opts"]]: options_dict[mode_icon] = mode_icon
         else:
             # --- SUB-MENU VIEW ---
-            rofi_list.append(ICONS["back"])
-            if path_depth >= 2: rofi_list.append(ICONS["home"])
+            rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS[ICONS['back']]}")
+            if path_depth >= 2:
+                rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS[ICONS['home']]}")
             
             items = list(active_menu.keys())
             if in_apps:
@@ -98,7 +113,8 @@ def main():
                 for i in items:
                     val = active_menu[i]
                     label = val.get("label", i) if isinstance(val, dict) else i
-                    icon = val.get("icon", "folder" if (isinstance(val, dict) and "items" in val) else "system-run") if isinstance(val, dict) else "system-run"
+                    is_folder = isinstance(val, dict) and ("items" in val or "cmd" not in val)
+                    icon = val.get("icon", FOLDER_ICON if is_folder else "system-run") if isinstance(val, dict) else (FOLDER_ICON if is_folder else "system-run")
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = i 
 
@@ -122,16 +138,17 @@ def main():
             else:
                 selection = active_menu.get(full_key)
             
-            if selection is None and in_run: selection = choice # Fix for binaries not in dict
+            if selection is None and in_run: selection = choice 
             if selection is None: continue
 
-            if isinstance(selection, dict) and ("items" in selection or "cmd" not in selection):
+            is_folder = isinstance(selection, dict) and ("items" in selection or "cmd" not in selection)
+            if (in_apps or in_run) and not isinstance(selection, dict): is_folder = False
+
+            if is_folder:
                 current_path.append(full_key)
             else:
-                # --- EXECUTION ENGINE ---
                 is_app = "(" + ICONS["apps"] in choice_raw or in_apps
                 is_run = "(" + ICONS["run"] in choice_raw or in_run
-                
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
                 cmd_data = selection.get("cmd", selection) if isinstance(selection, dict) else selection
                 
