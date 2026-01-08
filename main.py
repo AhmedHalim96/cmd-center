@@ -2,8 +2,8 @@
 import subprocess, os, sys, argparse
 from modules import config, scanner, engine
 from modules.constants import (
-    ICONS, NAV_ICONS, SEP_LINE, RUN_ICON, 
-    FOLDER_ICON, INTERNAL_MENU, get_help_text
+    ICONS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
+    FOLDER_ICON, INTERNAL_MENU, CLI_ONLY, get_help_text
 )
 
 def main():
@@ -44,6 +44,7 @@ def main():
         if in_opts: active_menu = INTERNAL_MENU
         elif in_apps: active_menu = scanner.get_system_apps()
         elif in_run:
+            # Merge system binaries with binary history
             run_hist = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
             active_menu = {**{b: b for b in scanner.get_binaries()}, **run_hist}
         else: active_menu = menu_data
@@ -70,14 +71,15 @@ def main():
                 rofi_list.append(f"{cat}\0icon\x1f{icon}")
             
             for mode in [ICONS["run"], ICONS["apps"], ICONS["opts"]]:
-                rofi_list.append(f"{mode}\0icon\x1f{NAV_ICONS.get(mode, 'system-run')}")
+                icon = NAV_ICONS.get(mode, "")
+                rofi_list.append(f"{mode}\0icon\x1f{icon}")
 
             rofi_list.append(SEP_LINE)
 
-            # Global Search Pool
+            # Build Global Search Pool
             flat_user = engine.get_flat_menu(menu_data)
             flat_internal = engine.get_flat_menu(INTERNAL_MENU, prefix=ICONS["opts"])
-            app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d['icon']}": d for n, d in scanner.get_system_apps().items()}
+            app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d.get('icon', '')}": d for n, d in scanner.get_system_apps().items()}
             run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
             
             combined_pool = {**flat_user, **flat_internal, **app_pool, **run_pool}
@@ -90,20 +92,20 @@ def main():
             
             rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
 
-            # Lookup mapping for Hub
+            # Mapping for selection
             for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
             for cat in menu_data: options_dict[cat] = cat
             for mode_icon in [ICONS["run"], ICONS["apps"], ICONS["opts"]]: options_dict[mode_icon] = mode_icon
         else:
             # --- SUB-MENU VIEW ---
-            rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS[ICONS['back']]}")
+            rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS.get(ICONS['back'], '')}")
             if path_depth >= 2:
-                rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS[ICONS['home']]}")
+                rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS.get(ICONS['home'], '')}")
             
             items = list(active_menu.keys())
             if in_apps:
                 items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
-                for i in items: rofi_list.append(f"{i}\0icon\x1f{active_menu[i].get('icon', 'system-run')}")
+                for i in items: rofi_list.append(f"{i}\0icon\x1f{active_menu[i].get('icon', '')}")
             elif in_run:
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
                 for i in items: rofi_list.append(f"{i}\0icon\x1f{RUN_ICON}")
@@ -114,12 +116,18 @@ def main():
                     val = active_menu[i]
                     label = val.get("label", i) if isinstance(val, dict) else i
                     is_folder = isinstance(val, dict) and ("items" in val or "cmd" not in val)
-                    icon = val.get("icon", FOLDER_ICON if is_folder else "system-run") if isinstance(val, dict) else (FOLDER_ICON if is_folder else "system-run")
+                    icon = val.get("icon", FOLDER_ICON if is_folder else "") if isinstance(val, dict) else (FOLDER_ICON if is_folder else "")
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = i 
 
-        # 6. Interaction
-        prompt = f" {settings.get('prompt_icon', '⚡')} {path_str if path_str else 'HUB'} "
+        # 6. Interaction (Dynamic Prompt Icon)
+        if not current_path:
+            p_icon, p_text = PROMPT_ICONS.get("HUB", ""), "HUB"
+        else:
+            p_icon = PROMPT_ICONS.get(current_path[0], PROMPT_ICONS.get("DEFAULT", ""))
+            p_text = path_str
+            
+        prompt = f" {p_icon} {p_text} ".strip()
         proc = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(rofi_list), text=True, capture_output=True)
         choice_raw = proc.stdout.strip()
         if not choice_raw or choice_raw == SEP_LINE:
@@ -127,7 +135,7 @@ def main():
             continue
         choice = choice_raw.split("\0")[0]
 
-        # 7. Routing & Execution
+        # 7. Smart Routing & Execution Engine
         if choice == ICONS["back"]: current_path.pop()
         elif choice == ICONS["home"]: current_path = []
         elif choice in [ICONS["opts"], ICONS["apps"], ICONS["run"]]: current_path = [choice]
@@ -141,19 +149,27 @@ def main():
             if selection is None and in_run: selection = choice 
             if selection is None: continue
 
-            is_folder = isinstance(selection, dict) and ("items" in selection or "cmd" not in selection)
-            if (in_apps or in_run) and not isinstance(selection, dict): is_folder = False
-
-            if is_folder:
+            if isinstance(selection, dict) and ("items" in selection or "cmd" not in selection):
                 current_path.append(full_key)
             else:
+                # Execution Logic
                 is_app = "(" + ICONS["apps"] in choice_raw or in_apps
                 is_run = "(" + ICONS["run"] in choice_raw or in_run
+                
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
                 cmd_data = selection.get("cmd", selection) if isinstance(selection, dict) else selection
                 
+                # Split for Smart Arguments
+                parts = str(choice).split()
+                base_bin = parts[0]
+                args_passed = " ".join(parts[1:])
+
+                # Detect if terminal is needed (from constants list or TERM: prefix)
+                needs_term = base_bin in CLI_ONLY or str(cmd_data).startswith("TERM:")
+                term_exec = settings.get("terminal_emulator", "wezterm start --")
+
                 if settings.get("remember_history", True):
-                    if is_run: w_key = f"RUN:{label}"
+                    if is_run: w_key = f"RUN:{base_bin}"
                     elif is_app: w_key = f"APP:{label}"
                     elif not current_path: w_key = f"HOME:{choice}"
                     else: w_key = f"{path_str}:{choice}"
@@ -164,15 +180,20 @@ def main():
 
                 if cmd_data == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
-                
-                t = settings.get("terminal_emulator", "wezterm start --")
+
                 cmd_str = str(cmd_data)
-                if cmd_str.startswith("TERM:"): f_cmd = f"{t} bash -c \"{cmd_str[5:]}; echo; read\""
-                elif cmd_str.startswith("EDT:"): f_cmd = f"{t} {settings.get('editor', 'nano')} {os.path.expanduser(cmd_str[4:])}"
-                elif cmd_str.startswith("WEB:"): 
+                if needs_term:
+                    clean_cmd = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
+                    # Append args only if we are in Run mode and typing manually
+                    if is_run and args_passed and args_passed != base_bin: 
+                        clean_cmd = f"{clean_cmd} {args_passed}"
+                    f_cmd = f"{term_exec} bash -c \"{clean_cmd}; echo; echo '[Finished]'; read\""
+                elif cmd_str.startswith("WEB:"):
                     url = cmd_str[4:] if '://' in cmd_str[4:] else 'https://' + cmd_str[4:]
                     f_cmd = f"xdg-open '{url}'"
-                else: f_cmd = cmd_str
+                else:
+                    # GUI/Background Launch with args
+                    f_cmd = f"{cmd_str} {args_passed}".strip() if is_run else cmd_str
                 
                 subprocess.Popen(f_cmd, shell=True, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 sys.exit(0)
