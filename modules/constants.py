@@ -1,7 +1,7 @@
 from modules import config
 
 # --- UI LABELS ---
-# These are the text strings used for navigation and matching
+# These are the text strings used for navigation and internal logic matching
 ICONS = {
     "opts": "Menu Settings",
     "apps": "Applications",
@@ -36,13 +36,24 @@ PROMPT_ICONS = {
     "DEFAULT": "📂"           # Custom Categories
 }
 
+# --- WEB SEARCH CONFIG ---
+# Typing the key followed by a space will trigger a search in your browser
+# Example: "g how to exit vim"
+SEARCH_PROVIDERS = {
+    "g": "https://www.google.com/search?q=",
+    "y": "https://www.youtube.com/results?search_query=",
+    "gh": "https://github.com/search?q=",
+    "w": "https://en.wikipedia.org/wiki/Special:Search?search=",
+    "r": "https://www.reddit.com/search/?q=",
+    "amz": "https://www.amazon.com/s?k="
+}
+
 # --- SMART LAUNCHER CONFIG ---
 # Binaries in this list will automatically open in a terminal window.
-# You can add any CLI tools you use frequently here.
 CLI_ONLY = [
     "htop", "btop", "nvtop", "atop", "vim", "nvim", "nano", 
     "ranger", "nmap", "ssh", "ping", "top", "gdb", "python",
-    "ipython", "ncdu", "journalctl", "dmesg", "htop", "glances"
+    "ipython", "ncdu", "journalctl", "dmesg", "glances", "tail"
 ]
 
 # --- INTERNAL ACTIONS ---
@@ -53,7 +64,6 @@ INTERNAL_MENU = {
 }
 
 # --- HELP TEXT ---
-# Displayed when running with --help
 def get_help_text(c):
     return (
         f"{c['bold']}{c['blue']}CMD-Center Launcher{c['reset']}\n"
