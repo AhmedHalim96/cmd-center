@@ -3,7 +3,8 @@ import subprocess, os, sys, argparse
 from modules import config, scanner, engine
 from modules.constants import (
     ICONS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
-    FOLDER_ICON, INTERNAL_MENU, CLI_ONLY, SEARCH_PROVIDERS, get_help_text
+    FOLDER_ICON, INTERNAL_MENU, CLI_ONLY, SEARCH_PROVIDERS, 
+    get_help_text, get_internal_help
 )
 
 def main():
@@ -33,6 +34,9 @@ def main():
         current_path = state.get("last_path", [])
 
     rofi_args = engine.build_rofi_args(settings)
+    
+    # Message variable for the help overlay
+    current_message = ""
 
     while True:
         path_depth = len(current_path)
@@ -73,12 +77,11 @@ def main():
                 rofi_list.append(f"{mode}\0icon\x1f{icon}")
 
             rofi_list.append(SEP_LINE)
-
+            
             flat_user = engine.get_flat_menu(menu_data)
             flat_internal = engine.get_flat_menu(INTERNAL_MENU, prefix=ICONS["opts"])
             app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d.get('icon', '')}": d for n, d in scanner.get_system_apps().items()}
             run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
-            
             combined_pool = {**flat_user, **flat_internal, **app_pool, **run_pool}
             
             def global_sort(x):
@@ -88,7 +91,6 @@ def main():
                 return weights.get(f"HOME:{clean_name}", 0)
             
             rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
-
             for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
             for cat in menu_data: options_dict[cat] = cat
             for mode_icon in [ICONS["run"], ICONS["apps"], ICONS["opts"]]: options_dict[mode_icon] = mode_icon
@@ -115,55 +117,77 @@ def main():
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = i 
 
-        # 6. Interaction
+        # 6. Interaction (Rofi Call - String Safe)
         p_icon = PROMPT_ICONS.get("HUB" if not current_path else current_path[0], PROMPT_ICONS.get("DEFAULT", ""))
         p_text = "HUB" if not current_path else path_str
         prompt = f" {p_icon} {p_text} ".strip()
         
-        proc = subprocess.run(rofi_args + ["-p", prompt], input="\n".join(rofi_list), text=True, capture_output=True)
+        # Build command list ensuring all elements are strings
+        final_rofi_args = [str(x) for x in rofi_args] + ["-p", str(prompt)]
+        if current_message:
+            final_rofi_args += ["-mesg", str(current_message)]
+            current_message = ""
+
+        proc = subprocess.run(final_rofi_args, input="\n".join(rofi_list), text=True, capture_output=True)
         choice_raw = proc.stdout.strip()
         if not choice_raw or choice_raw == SEP_LINE:
             if not choice_raw: sys.exit(0)
             continue
         choice = choice_raw.split("\0")[0]
 
-        # 7. Smart Routing & Execution Engine
+        # 7. Execution Engine
         if choice == ICONS["back"]: current_path.pop()
         elif choice == ICONS["home"]: current_path = []
         elif choice in [ICONS["opts"], ICONS["apps"], ICONS["run"]]: current_path = [choice]
         else:
-            # A. Web Search Parser
-            parts = str(choice).split()
+            # Web Search Parser
+            parts = choice.split()
             if len(parts) > 1 and parts[0] in SEARCH_PROVIDERS:
                 query = "+".join(parts[1:])
                 subprocess.Popen(f"xdg-open '{SEARCH_PROVIDERS[parts[0]]}{query}'", shell=True, start_new_session=True)
                 sys.exit(0)
 
             full_key = options_dict.get(choice, choice)
-            if not current_path:
-                selection = combined_pool.get(full_key) or menu_data.get(full_key)
-            else:
-                selection = active_menu.get(full_key)
+            selection = combined_pool.get(full_key) or menu_data.get(full_key) if not current_path else active_menu.get(full_key)
             
-            # Binary Runner: If selection is missing, it's a manual command
-            is_manual_run = selection is None and in_run
-            if is_manual_run: selection = choice 
-            
+            if selection is None and in_run: selection = choice 
             if selection is None: continue
 
             if isinstance(selection, dict) and ("items" in selection or "cmd" not in selection):
                 current_path.append(full_key)
             else:
-                # B. Execute Command Logic
-                is_app = "(" + ICONS["apps"] in choice_raw or in_apps
-                is_run = "(" + ICONS["run"] in choice_raw or in_run
-                
-                label = choice.split("    (")[0] if (is_app or is_run) else choice
-                cmd_data = selection.get("cmd", selection) if isinstance(selection, dict) else selection
-                cmd_str = str(cmd_data)
+                cmd_str = str(selection.get("cmd", selection) if isinstance(selection, dict) else selection)
 
-                # Identify if this command needs a terminal
-                # Extract first word to check against CLI_ONLY list
+                if cmd_str == "INTERNAL:HELP":
+                    from modules.constants import get_internal_help
+                    import tempfile
+                    
+                    help_content = get_internal_help()
+                    
+                    # Create a temporary file to hold the help text
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=True) as temp:
+                        temp.write(help_content)
+                        temp.flush()
+                        
+                        subprocess.run([
+                            "yad", 
+                            "--text-info", 
+                            "--filename=" + temp.name,
+                            "--title=Command Center Help",
+                            "--width=600", 
+                            "--height=500",
+                            "--center",
+                            "--fontname=Monospace 11", # Ensures column alignment
+                            "--button=Close:0"
+                        ])
+                    continue
+                
+                if cmd_str == "INTERNAL:CLEAR_HIST":
+                    state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
+
+                is_app, is_run = "(" + ICONS["apps"] in choice_raw or in_apps, "(" + ICONS["run"] in choice_raw or in_run
+                label = choice.split("    (")[0] if (is_app or is_run) else choice
+                
                 base_bin = os.path.basename(cmd_str.split()[0]) if cmd_str.split() else ""
                 needs_term = base_bin in CLI_ONLY or cmd_str.startswith("TERM:")
                 term_exec = settings.get("terminal_emulator", "wezterm start --")
@@ -175,12 +199,7 @@ def main():
                 state["last_path"], state["history"] = (current_path, weights)
                 config.save_json(config.STATE_PATH, state)
 
-                if cmd_str == "INTERNAL:CLEAR_HIST":
-                    state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
-
-                # Final Construction
                 if needs_term:
-                    # Clean the command (remove prefix)
                     payload = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
                     f_cmd = f"{term_exec} bash -c '{payload}; echo; echo \"[Finished - Press Enter]\"; read'"
                 elif cmd_str.startswith("WEB:"):
@@ -189,8 +208,7 @@ def main():
                 else:
                     f_cmd = cmd_str
 
-                subprocess.Popen(f_cmd, shell=True, start_new_session=True, 
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.Popen(f_cmd, shell=True, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 sys.exit(0)
 
         state["last_path"] = current_path
