@@ -1,6 +1,7 @@
-def build_rofi_args(settings):
+def build_rofi_args(settings, enable_icons=False):
     """
-    Constructs the base Rofi command line based on user settings.
+    Constructs the Rofi command. Icons are enabled only if 
+    enable_icons is True or the global setting is True.
     """
     loc_val = {"top": 2, "bottom": 7, "left": 4, "right": 5, "center": 0}.get(settings.get("location", "center"), 0)
     width, lines = settings.get("width", 30), settings.get("height", 12)
@@ -10,11 +11,13 @@ def build_rofi_args(settings):
         f"listview {{ lines: {lines}; columns: 1; }}"
     )
     
-    return [
-        "rofi", "-dmenu", "-i", "-show-icons", 
-        "-location", str(loc_val), 
-        "-theme-str", theme
-    ]
+    cmd = ["rofi", "-dmenu", "-i", "-location", str(loc_val), "-theme-str", theme]
+    
+    # Toggle icons based on the passed state
+    if enable_icons or settings.get("show_icons_globally", False):
+        cmd.append("-show-icons")
+        
+    return cmd
 
 def get_flat_menu(menu, prefix=""):
     """

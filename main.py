@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import subprocess, os, sys, argparse
+import subprocess, os, sys, argparse, tempfile
 from modules import config, scanner, engine
 from modules.constants import (
     ICONS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
@@ -33,9 +33,7 @@ def main():
     elif settings.get("remember_last_path", True):
         current_path = state.get("last_path", [])
 
-    rofi_args = engine.build_rofi_args(settings)
-    
-    # Message variable for the help overlay
+    # State variable for the help message (for internal logic)
     current_message = ""
 
     while True:
@@ -43,6 +41,11 @@ def main():
         in_run = path_depth > 0 and current_path[0] == ICONS["run"]
         in_apps = path_depth > 0 and current_path[0] == ICONS["apps"]
         in_opts = path_depth > 0 and current_path[0] == ICONS["opts"]
+
+        # --- DYNAMIC ICON LOGIC ---
+        # Icons show if we are in Apps category OR if global setting is true
+        show_icons = in_apps or settings.get("show_icons_globally", False)
+        rofi_base_cmd = engine.build_rofi_args(settings, enable_icons=show_icons)
 
         # 3. Resolve Menu Source
         if in_opts: active_menu = INTERNAL_MENU
@@ -117,16 +120,12 @@ def main():
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = i 
 
-        # 6. Interaction (Rofi Call - String Safe)
+        # 6. Interaction (Rofi Call)
         p_icon = PROMPT_ICONS.get("HUB" if not current_path else current_path[0], PROMPT_ICONS.get("DEFAULT", ""))
         p_text = "HUB" if not current_path else path_str
         prompt = f" {p_icon} {p_text} ".strip()
         
-        # Build command list ensuring all elements are strings
-        final_rofi_args = [str(x) for x in rofi_args] + ["-p", str(prompt)]
-        if current_message:
-            final_rofi_args += ["-mesg", str(current_message)]
-            current_message = ""
+        final_rofi_args = [str(x) for x in rofi_base_cmd] + ["-p", str(prompt)]
 
         proc = subprocess.run(final_rofi_args, input="\n".join(rofi_list), text=True, capture_output=True)
         choice_raw = proc.stdout.strip()
@@ -158,33 +157,23 @@ def main():
             else:
                 cmd_str = str(selection.get("cmd", selection) if isinstance(selection, dict) else selection)
 
+                # --- INTERNAL: HELP (YAD WAYLAND FIX) ---
                 if cmd_str == "INTERNAL:HELP":
-                    from modules.constants import get_internal_help
-                    import tempfile
-                    
                     help_content = get_internal_help()
-                    
-                    # Create a temporary file to hold the help text
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=True) as temp:
                         temp.write(help_content)
                         temp.flush()
-                        
                         subprocess.run([
-                            "yad", 
-                            "--text-info", 
-                            "--filename=" + temp.name,
-                            "--title=Command Center Help",
-                            "--width=600", 
-                            "--height=500",
-                            "--center",
-                            "--fontname=Monospace 11", # Ensures column alignment
-                            "--button=Close:0"
+                            "yad", "--text-info", "--filename=" + temp.name,
+                            "--title=Help", "--width=600", "--height=500",
+                            "--center", "--fontname=Monospace 11", "--button=Close:0"
                         ])
                     continue
                 
                 if cmd_str == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
 
+                # --- STANDARD EXECUTION ---
                 is_app, is_run = "(" + ICONS["apps"] in choice_raw or in_apps, "(" + ICONS["run"] in choice_raw or in_run
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
                 
