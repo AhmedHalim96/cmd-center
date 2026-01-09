@@ -33,9 +33,6 @@ def main():
     elif settings.get("remember_last_path", True):
         current_path = state.get("last_path", [])
 
-    # State variable for the help message (for internal logic)
-    current_message = ""
-
     while True:
         path_depth = len(current_path)
         in_run = path_depth > 0 and current_path[0] == ICONS["run"]
@@ -55,7 +52,7 @@ def main():
             active_menu = {**{b: b for b in scanner.get_binaries()}, **run_hist}
         else: active_menu = menu_data
 
-        # 4. Navigate hierarchy
+        # 4. Navigate Hierarchy
         try:
             start_idx = 1 if (in_opts or in_apps or in_run) else 0
             for i in range(start_idx, path_depth):
@@ -120,7 +117,7 @@ def main():
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = i 
 
-        # 6. Interaction (Rofi Call)
+        # 6. Interaction
         p_icon = PROMPT_ICONS.get("HUB" if not current_path else current_path[0], PROMPT_ICONS.get("DEFAULT", ""))
         p_text = "HUB" if not current_path else path_str
         prompt = f" {p_icon} {p_text} ".strip()
@@ -157,36 +154,41 @@ def main():
             else:
                 cmd_str = str(selection.get("cmd", selection) if isinstance(selection, dict) else selection)
 
-                # --- INTERNAL: HELP (YAD WAYLAND FIX) ---
+                # --- INTERNAL COMMANDS ---
                 if cmd_str == "INTERNAL:HELP":
                     help_content = get_internal_help()
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=True) as temp:
                         temp.write(help_content)
                         temp.flush()
-                        subprocess.run([
-                            "yad", "--text-info", "--filename=" + temp.name,
-                            "--title=Help", "--width=600", "--height=500",
-                            "--center", "--fontname=Monospace 11", "--button=Close:0"
-                        ])
+                        subprocess.run(["yad", "--text-info", f"--filename={temp.name}", "--title=Help", "--width=600", "--height=500", "--center", "--fontname=Monospace 11", "--button=Close:0"])
                     continue
                 
                 if cmd_str == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
 
-                # --- STANDARD EXECUTION ---
-                is_app, is_run = "(" + ICONS["apps"] in choice_raw or in_apps, "(" + ICONS["run"] in choice_raw or in_run
+                # --- HISTORY TRACKING & STATE SAVING ---
+                is_app = "(" + ICONS["apps"] in choice_raw or in_apps
+                is_run = "(" + ICONS["run"] in choice_raw or in_run
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
-                
                 base_bin = os.path.basename(cmd_str.split()[0]) if cmd_str.split() else ""
-                needs_term = base_bin in CLI_ONLY or cmd_str.startswith("TERM:")
-                term_exec = settings.get("terminal_emulator", "wezterm start --")
 
                 if settings.get("remember_history", True):
-                    w_key = f"RUN:{base_bin}" if is_run else (f"APP:{label}" if is_app else f"{path_str}:{label}")
+                    # Normalized weighting keys for consistent lookup
+                    if is_run: 
+                        clean_run_cmd = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
+                        w_key = f"RUN:{clean_run_cmd}"
+                    elif is_app: w_key = f"APP:{label}"
+                    elif not current_path: w_key = f"HOME:{choice}"
+                    else: w_key = f"{path_str}:{choice}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
-                state["last_path"], state["history"] = (current_path, weights)
-                config.save_json(config.STATE_PATH, state)
+                state["last_path"] = current_path
+                state["history"] = weights
+                config.save_json(config.STATE_PATH, state) # SAVE BEFORE LAUNCH
+
+                # --- LAUNCH ---
+                needs_term = base_bin in CLI_ONLY or cmd_str.startswith("TERM:")
+                term_exec = settings.get("terminal_emulator", "wezterm start --")
 
                 if needs_term:
                     payload = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
