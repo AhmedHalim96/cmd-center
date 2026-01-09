@@ -40,7 +40,6 @@ def main():
         in_opts = path_depth > 0 and current_path[0] == ICONS["opts"]
 
         # --- DYNAMIC ICON LOGIC ---
-        # Icons show if we are in Apps category OR if global setting is true
         show_icons = in_apps or settings.get("show_icons_globally", False)
         rofi_base_cmd = engine.build_rofi_args(settings, enable_icons=show_icons)
 
@@ -48,6 +47,7 @@ def main():
         if in_opts: active_menu = INTERNAL_MENU
         elif in_apps: active_menu = scanner.get_system_apps()
         elif in_run:
+            # Pull full command strings from history
             run_hist = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
             active_menu = {**{b: b for b in scanner.get_binaries()}, **run_hist}
         else: active_menu = menu_data
@@ -104,6 +104,7 @@ def main():
                 items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
                 for i in items: rofi_list.append(f"{i}\0icon\x1f{active_menu[i].get('icon', '')}")
             elif in_run:
+                # Primary sort by weight (frequency of use)
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
                 for i in items: rofi_list.append(f"{i}\0icon\x1f{RUN_ICON}")
             else:
@@ -123,7 +124,6 @@ def main():
         prompt = f" {p_icon} {p_text} ".strip()
         
         final_rofi_args = [str(x) for x in rofi_base_cmd] + ["-p", str(prompt)]
-
         proc = subprocess.run(final_rofi_args, input="\n".join(rofi_list), text=True, capture_output=True)
         choice_raw = proc.stdout.strip()
         if not choice_raw or choice_raw == SEP_LINE:
@@ -166,17 +166,16 @@ def main():
                 if cmd_str == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
 
-                # --- HISTORY TRACKING & STATE SAVING ---
+                # --- HISTORY TRACKING ---
                 is_app = "(" + ICONS["apps"] in choice_raw or in_apps
                 is_run = "(" + ICONS["run"] in choice_raw or in_run
                 label = choice.split("    (")[0] if (is_app or is_run) else choice
-                base_bin = os.path.basename(cmd_str.split()[0]) if cmd_str.split() else ""
-
+                
                 if settings.get("remember_history", True):
-                    # Normalized weighting keys for consistent lookup
-                    if is_run: 
-                        clean_run_cmd = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
-                        w_key = f"RUN:{clean_run_cmd}"
+                    if is_run:
+                        # Save full command string to history
+                        clean_run = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
+                        w_key = f"RUN:{clean_run}"
                     elif is_app: w_key = f"APP:{label}"
                     elif not current_path: w_key = f"HOME:{choice}"
                     else: w_key = f"{path_str}:{choice}"
@@ -184,18 +183,23 @@ def main():
                 
                 state["last_path"] = current_path
                 state["history"] = weights
-                config.save_json(config.STATE_PATH, state) # SAVE BEFORE LAUNCH
+                config.save_json(config.STATE_PATH, state)
 
-                # --- LAUNCH ---
+                # --- LAUNCH ENGINE ---
+                base_bin = os.path.basename(cmd_str.split()[0]) if cmd_str.split() else ""
                 needs_term = base_bin in CLI_ONLY or cmd_str.startswith("TERM:")
                 term_exec = settings.get("terminal_emulator", "wezterm start --")
+                editor = settings.get("editor", "nvim")
 
-                if needs_term:
-                    payload = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
-                    f_cmd = f"{term_exec} bash -c '{payload}; echo; echo \"[Finished - Press Enter]\"; read'"
+                if cmd_str.startswith("EDT:"):
+                    file_path = os.path.expanduser(cmd_str[4:].strip())
+                    f_cmd = f"{term_exec} {editor} '{file_path}'"
                 elif cmd_str.startswith("WEB:"):
                     url = cmd_str[4:] if '://' in cmd_str[4:] else 'https://' + cmd_str[4:]
                     f_cmd = f"xdg-open '{url}'"
+                elif needs_term:
+                    payload = cmd_str[5:] if cmd_str.startswith("TERM:") else cmd_str
+                    f_cmd = f"{term_exec} bash -c '{payload}; echo; echo \"[Finished]\"; read'"
                 else:
                     f_cmd = cmd_str
 
