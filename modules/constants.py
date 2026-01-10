@@ -1,7 +1,7 @@
 from modules import config
 
 # --- UI LABELS ---
-# These now include the Icon and the Label for the "Icon Label" look.
+# These include the Icon and the Label for the unified "Icon Label" look.
 ICONS = {
     "opts": "⚙️️️ Menu Settings",
     "apps": "📱 Applications",
@@ -12,7 +12,7 @@ ICONS = {
 }
 
 # --- ICON MAPPING ---
-# These are the internal Rofi icon names for the -show-icons mode.
+# Maps the UI labels to internal system icon names for Rofi's -show-icons mode.
 NAV_ICONS = {
     ICONS["back"]: "go-previous",
     ICONS["home"]: "go-home",

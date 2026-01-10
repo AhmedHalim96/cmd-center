@@ -100,18 +100,20 @@ def main():
 
             rofi_list.append(SEP_LINE)
 
-            # C. Home Search Pool (Custom items + Binaries, NO system apps)
+            # C. Home Search Pool
             run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
-            # Note: app_pool removed here to keep home clean
-            combined_pool = {**engine.get_flat_menu(menu_data), **run_pool}
+            flat_menu = engine.get_flat_menu(menu_data)
+            combined_pool = {**flat_menu, **run_pool}
             
             def global_sort(x):
                 clean = x.split("\0")[0]
                 if clean.endswith(f"({ICONS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
                 return weights.get(f"HOME:{clean}", 0)
             
-            rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
-            for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
+            sorted_pool = sorted(combined_pool.keys(), key=global_sort, reverse=True)
+            rofi_list.extend(sorted_pool)
+            for k in combined_pool.keys(): 
+                options_dict[k.split("\0")[0]] = k 
 
             # D. Internal Menu
             for label in INTERNAL_MENU.keys():
@@ -128,19 +130,18 @@ def main():
                 items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
                 for i in items: rofi_list.append(f"{i}\0icon\x1f{active_menu[i].get('icon', '')}")
             elif in_run:
-                items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
+                items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower()), reverse=True)
                 for i in items: rofi_list.append(f"🚀  {i}\0icon\x1f{RUN_ICON}")
             elif in_config:
                 home = os.path.expanduser("~")
                 def config_sort(x):
-                    label = f"📄 {os.path.basename(x)}    ({x.replace(home, '~')})"
-                    return (weights.get(f"{ICONS['config']}:{label}", 0), os.path.basename(x).lower())
+                    return (weights.get(f"{ICONS['config']}:{os.path.basename(x)}", 0), os.path.basename(x).lower())
                 
                 items.sort(key=config_sort, reverse=True)
                 for fp in items:
                     fname = os.path.basename(fp)
                     label = f"📄 {fname}    ({fp.replace(home, '~')})"
-                    w = weights.get(f"{ICONS['config']}:{label}", 0)
+                    w = weights.get(f"{ICONS['config']}:{fname}", 0)
                     icon = "🔥" if w > 5 else "📄"
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = fp
@@ -167,7 +168,7 @@ def main():
         # 7. Execution Engine
         if choice.startswith(ICONS["back"]):
             if current_path: current_path.pop()
-        elif choice.startswith(ICONS["home"]):
+        elif choice.startswith(ICONS.get("home", "🏠")) and ICONS.get("home") in choice:
             current_path = []
         elif choice in ICONS.values():
             current_path = [choice]
@@ -182,7 +183,6 @@ def main():
             
             # Resolve Selection
             if not current_path:
-                # First check internal menu, then custom pool, then categories
                 sel = INTERNAL_MENU.get(f_key) or combined_pool.get(f_key) or menu_data.get(f_key)
             else:
                 sel = active_menu.get(f_key)
