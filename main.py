@@ -52,8 +52,7 @@ def main():
             run_hist = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
             active_menu = {**{b: b for b in scanner.get_binaries()}, **run_hist}
         elif in_config:
-            # Restricted Default Path Logic
-            paths_to_scan = ['~/.config/cmd-center/config.json', *settings.get("editor_paths", [])]
+            paths_to_scan = settings.get("editor_paths", ['~/.config/cmd-center/config.json'])
             config_files = {}
             for p in paths_to_scan:
                 full_b = os.path.expanduser(p)
@@ -84,30 +83,27 @@ def main():
 
         # 5. Build Rofi List
         if not current_path:
-            # Hub Categories
             cats = sorted(menu_data.keys(), key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             for cat in cats:
                 val = menu_data[cat]
                 icon = val.get("icon", FOLDER_ICON) if isinstance(val, dict) else FOLDER_ICON
                 rofi_list.append(f"{icon}  {cat}\0icon\x1f{icon}")
             
-            # Pinned Modes
             for m_key in ["run", "apps", "config", "opts"]:
                 label = ICONS[m_key]
                 rofi_list.append(f"{label}\0icon\x1f{NAV_ICONS.get(label, 'folder')}")
 
             rofi_list.append(SEP_LINE)
             
-            # Search Pool
             app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d.get('icon', '')}": d for n, d in scanner.get_system_apps().items()}
             run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
             combined_pool = {**engine.get_flat_menu(menu_data), **app_pool, **run_pool}
             
             def global_sort(x):
-                clean_name = x.split("\0")[0]
-                if clean_name.endswith(f"({ICONS['apps']})"): return weights.get(f"APP:{clean_name.split('    (')[0]}", 0)
-                if clean_name.endswith(f"({ICONS['run']})"): return weights.get(f"RUN:{clean_name.split('    (')[0]}", 0)
-                return weights.get(f"HOME:{clean_name}", 0)
+                clean = x.split("\0")[0]
+                if clean.endswith(f"({ICONS['apps']})"): return weights.get(f"APP:{clean.split('    (')[0]}", 0)
+                if clean.endswith(f"({ICONS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
+                return weights.get(f"HOME:{clean}", 0)
             
             rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
             for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
@@ -116,7 +112,6 @@ def main():
                 options_dict[f"{icon}  {c}"] = c
             for k in ICONS: options_dict[ICONS[k]] = ICONS[k]
         else:
-            # Navigation
             rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS[ICONS['back']]}")
             if path_depth >= 2:
                 rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS[ICONS['home']]}")
@@ -129,12 +124,19 @@ def main():
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
                 for i in items: rofi_list.append(f"🚀  {i}\0icon\x1f{RUN_ICON}")
             elif in_config:
-                # Format: 📄 filename (path)
-                items.sort(key=lambda x: os.path.basename(x).lower())
+                # Weighted Sort for Config Editor
                 home = os.path.expanduser("~")
+                def config_sort(x):
+                    label = f"📄 {os.path.basename(x)}    ({x.replace(home, '~')})"
+                    return (weights.get(f"{ICONS['config']}:{label}", 0), os.path.basename(x).lower())
+                
+                items.sort(key=config_sort, reverse=True)
                 for fp in items:
-                    label = f"📄 {os.path.basename(fp)}    ({fp.replace(home, '~')})"
-                    rofi_list.append(f"{label}\0icon\x1f{NAV_ICONS[ICONS['config']]}")
+                    fname = os.path.basename(fp)
+                    label = f"📄 {fname}    ({fp.replace(home, '~')})"
+                    w = weights.get(f"{ICONS['config']}:{label}", 0)
+                    icon = "🔥" if w > 5 else "📄"
+                    rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = fp
             else:
                 for i in items:
@@ -145,10 +147,7 @@ def main():
 
         # 6. Interaction & Breadcrumbs
         p_key = "HUB" if not current_path else current_path[0]
-        # Prompts are ✨, 📱, 🚀, 📝, ⚙️
         symbol = PROMPT_ICONS.get(p_key, PROMPT_ICONS["DEFAULT"])
-        
-        # Breadcrumb Logic: Symbol + Path
         breadcrumb = symbol if not current_path else f"{symbol} {path_str}"
         
         proc = subprocess.run([str(x) for x in rofi_base_cmd] + ["-p", breadcrumb], input="\n".join(rofi_list), text=True, capture_output=True)
@@ -157,10 +156,13 @@ def main():
             if not choice: sys.exit(0)
             continue
 
-        # 7. Execution Engine
-        if choice == ICONS["back"]: current_path.pop()
-        elif choice == ICONS["home"]: current_path = []
-        elif choice in ICONS.values(): current_path = [choice]
+        # 7. Execution Engine (Emoji-Proof Fix)
+        if choice.startswith(ICONS["back"]):
+            if current_path: current_path.pop()
+        elif choice.startswith(ICONS["home"]):
+            current_path = []
+        elif choice in ICONS.values():
+            current_path = [choice]
         else:
             # Web Search
             parts = choice.split()
@@ -192,7 +194,7 @@ def main():
                 if settings.get("remember_history", True):
                     if is_r: w_key = f"RUN:{cmd[5:] if cmd.startswith('TERM:') else cmd}"
                     elif is_a: w_key = f"APP:{choice.split('    (')[0]}"
-                    else: w_key = f"{path_str if current_path else 'HOME'}:{f_key}"
+                    else: w_key = f"{path_str if current_path else 'HOME'}:{choice}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
                 state["last_path"], state["history"] = current_path, weights
@@ -205,7 +207,8 @@ def main():
                 elif cmd.startswith("WEB:"):
                     f_cmd = f"xdg-open '{cmd[4:] if '://' in cmd[4:] else 'https://' + cmd[4:]}'"
                 elif (os.path.basename(cmd.split()[0]) if cmd.split() else "") in CLI_ONLY or cmd.startswith("TERM:"):
-                    f_cmd = f"{term} bash -c '{cmd[5:] if cmd.startswith('TERM:') else cmd}; echo; read'"
+                    payload = cmd[5:] if cmd.startswith("TERM:") else cmd
+                    f_cmd = f"{term} bash -c '{payload}; echo; read'"
                 else: 
                     f_cmd = cmd
 
