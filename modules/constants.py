@@ -1,44 +1,44 @@
 from modules import config
 
 # --- UI LABELS ---
-# These are the text strings used for navigation and internal logic matching
+# These now include the Icon and the Label for the "Icon Label" look.
 ICONS = {
-    "opts": "Menu Settings",
-    "apps": "Applications",
-    "run": "Run",
-    "back": "BACK",
-    "home": "HOME"
+    "opts": "⚙️️️ Menu Settings",
+    "apps": "📱 Applications",
+    "run": "🚀 Run Command",
+    "config": "📝 Config Editor",
+    "back": "⬅ BACK",
+    "home": "🏠 HOME",
 }
 
 # --- ICON MAPPING ---
-# Icon names for Rofi's -show-icons mode. 
-# Set a value to "" to make it blank/text-only.
+# These are the internal Rofi icon names for the -show-icons mode.
 NAV_ICONS = {
     ICONS["back"]: "go-previous",
     ICONS["home"]: "go-home",
     ICONS["opts"]: "emblem-system",
     ICONS["apps"]: "applications-all",
-    ICONS["run"]: "run"
+    ICONS["run"]: "utilities-terminal",
+    ICONS["config"]: "accessories-text-editor"
 }
 
 # Default icons for general items
-FOLDER_ICON = "folder"
+FOLDER_ICON = ""
 RUN_ICON = "utilities-terminal"
 SEP_LINE = "────────────────────────────────────────"
 
 # --- PROMPT VISUALS ---
 # The symbol shown in the Rofi prompt bar based on your location
 PROMPT_ICONS = {
-    "HUB": "⚡",              # Main Screen
-    ICONS["apps"]: "📱",      # Applications Mode
-    ICONS["run"]: "🚀",       # Run/Binary Mode
-    ICONS["opts"]: "🛠️",      # Settings Mode
-    "DEFAULT": "📂"           # Custom Categories
+    "HUB": "✨",                 # Main Screen
+    ICONS["apps"]: "📱",        # Applications Mode
+    ICONS["run"]: "🚀",          # Run/Binary Mode
+    ICONS["config"]: "📝",    # Config Editor
+    ICONS["opts"]: "⚙️",        # Settings Mode
+    "DEFAULT": "📂"                 # Custom Categories
 }
 
 # --- WEB SEARCH CONFIG ---
-# Typing the key followed by a space will trigger a search in your browser
-# Example: "g how to exit vim"
 SEARCH_PROVIDERS = {
     "g": "https://www.google.com/search?q=",
     "y": "https://www.youtube.com/results?search_query=",
@@ -49,7 +49,6 @@ SEARCH_PROVIDERS = {
 }
 
 # --- SMART LAUNCHER CONFIG ---
-# Binaries in this list will automatically open in a terminal window.
 CLI_ONLY = [
     "htop", "btop", "nvtop", "atop", "vim", "nvim", "nano", 
     "ranger", "nmap", "ssh", "ping", "top", "gdb", "python",
@@ -57,25 +56,21 @@ CLI_ONLY = [
 ]
 
 # --- INTERNAL ACTIONS ---
-# Fixed commands for the 'Menu Settings' section
 INTERNAL_MENU = {
-    "❓ Help & Keybinds": "INTERNAL:HELP",  # New help command
+    "❓ Help & Keybinds": "INTERNAL:HELP",
     "🧹 Clear History": "INTERNAL:CLEAR_HIST",
-    "📝 Edit Config": f"TERM:nvim {config.CONFIG_PATH}"
 }
 
 # --- HELP TEXT ---
 def get_help_text(c):
     return (
         f"{c['bold']}{c['blue']}CMD-Center Launcher{c['reset']}\n"
-        f"{c['yellow']}Usage:{c['reset']} cmd-center [{c['green']}apps|run|options{c['reset']}]\n\n"
+        f"{c['yellow']}Usage:{c['reset']} cmd-center [{c['green']}apps|run|config|options{c['reset']}]\n\n"
         f"  {c['green']}apps{c['reset']}      Direct to Applications\n"
         f"  {c['green']}run{c['reset']}       Direct to Binary Runner\n"
+        f"  {c['green']}config{c['reset']}    Direct to Config Editor\n"
         f"  {c['green']}options{c['reset']}   Direct to Settings"
     )
-
-
-
 
 def get_internal_help():
     """Generates a clean, aligned plain-text help screen"""
@@ -83,6 +78,11 @@ def get_internal_help():
         "╔══════════════════════════════════════════════════════════╗",
         "║                COMMAND CENTER QUICK START                ║",
         "╚══════════════════════════════════════════════════════════╝",
+        "",
+        " ■ MODES",
+        f"   {ICONS['apps'].ljust(20)} -> Browse system desktop files",
+        f"   {ICONS['run'].ljust(20)} -> Execute binaries with history",
+        f"   {ICONS['config'].ljust(20)} -> Edit defined config files",
         "",
         " ■ WEB SEARCHES",
         "   Type the prefix followed by your query:",
@@ -97,12 +97,12 @@ def get_internal_help():
     lines.append(" ■ COMMAND PREFIXES")
     lines.append("   TERM:  Forces command to run in a Terminal window")
     lines.append("   WEB:   Forces string to open as a URL in Browser")
+    lines.append("   EDT:   Opens file in terminal editor (Config Mode)")
     lines.append("")
     lines.append(" ■ AUTO-TERMINAL APPLICATIONS")
     lines.append("   The following run in terminal automatically:")
     lines.append("   --------------------------------------------------------")
     
-    # Wrap the CLI list so it doesn't go off screen
     cli_apps = sorted(CLI_ONLY)
     for i in range(0, len(cli_apps), 4):
         lines.append("   " + ", ".join(cli_apps[i:i+4]))
