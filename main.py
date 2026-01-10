@@ -52,7 +52,7 @@ def main():
             run_hist = {k.split("RUN:")[1]: k.split("RUN:")[1] for k in weights.keys() if k.startswith("RUN:")}
             active_menu = {**{b: b for b in scanner.get_binaries()}, **run_hist}
         elif in_config:
-            paths_to_scan = settings.get("editor_paths", ['~/.config/cmd-center/config.json'])
+            paths_to_scan = ['~/.config/cmd-center/config.json', *settings.get("editor_paths", [])]
             config_files = {}
             for p in paths_to_scan:
                 full_b = os.path.expanduser(p)
