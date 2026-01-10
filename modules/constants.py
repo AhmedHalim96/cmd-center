@@ -2,7 +2,7 @@ from modules import config
 
 # --- UI LABELS ---
 # These include the Icon and the Label for the unified "Icon Label" look.
-ICONS = {
+LABELS = {
     "opts": "⚙️️️ Menu Settings",
     "apps": "📱 Applications",
     "run": "🚀 Run",
@@ -14,12 +14,12 @@ ICONS = {
 # --- ICON MAPPING ---
 # Maps the UI labels to internal system icon names for Rofi's -show-icons mode.
 NAV_ICONS = {
-    ICONS["back"]: "go-previous",
-    ICONS["home"]: "go-home",
-    ICONS["opts"]: "emblem-system",
-    ICONS["apps"]: "applications-all",
-    ICONS["run"]: "utilities-terminal",
-    ICONS["config"]: "accessories-text-editor"
+    LABELS["back"]: "go-previous",
+    LABELS["home"]: "go-home",
+    LABELS["opts"]: "emblem-system",
+    LABELS["apps"]: "applications-all",
+    LABELS["run"]: "utilities-terminal",
+    LABELS["config"]: "accessories-text-editor"
 }
 
 # Default icons for general items
@@ -31,10 +31,10 @@ SEP_LINE = "──────────────────────�
 # The symbol shown in the Rofi prompt bar based on your location
 PROMPT_ICONS = {
     "HUB": "✨",                 # Main Screen
-    ICONS["apps"]: "📱",        # Applications Mode
-    ICONS["run"]: "🚀",          # Run/Binary Mode
-    ICONS["config"]: "📝",    # Config Editor
-    ICONS["opts"]: "⚙️",        # Settings Mode
+    LABELS["apps"]: "📱",        # Applications Mode
+    LABELS["run"]: "🚀",          # Run/Binary Mode
+    LABELS["config"]: "📝",    # Config Editor
+    LABELS["opts"]: "⚙️",        # Settings Mode
     "DEFAULT": "📂"                 # Custom Categories
 }
 
@@ -80,9 +80,9 @@ def get_internal_help():
         "╚══════════════════════════════════════════════════════════╝",
         "",
         " ■ MODES",
-        f"   {ICONS['apps'].ljust(20)} -> Browse system desktop files",
-        f"   {ICONS['run'].ljust(20)} -> Execute binaries with history",
-        f"   {ICONS['config'].ljust(20)} -> Edit defined config files",
+        f"   {LABELS['apps'].ljust(20)} -> Browse system desktop files",
+        f"   {LABELS['run'].ljust(20)} -> Execute binaries with history",
+        f"   {LABELS['config'].ljust(20)} -> Edit defined config files",
         "",
         " ■ WEB SEARCHES",
         "   Type the prefix followed by your query:",

@@ -2,7 +2,7 @@
 import subprocess, os, sys, argparse, tempfile
 from modules import config, scanner, engine
 from modules.constants import (
-    ICONS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
+    LABELS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
     FOLDER_ICON, INTERNAL_MENU, CLI_ONLY, SEARCH_PROVIDERS, 
     get_help_text, get_internal_help
 )
@@ -28,17 +28,17 @@ def main():
     # 2. Path Resolution
     current_path = []
     if args.mode:
-        mapping = {"apps": ICONS["apps"], "run": ICONS["run"], "config": ICONS["config"], "options": ICONS["opts"]}
+        mapping = {"apps": LABELS["apps"], "run": LABELS["run"], "config": LABELS["config"], "options": LABELS["opts"]}
         current_path = [mapping[args.mode]]
     elif settings.get("remember_last_path", True):
         current_path = state.get("last_path", [])
 
     while True:
         path_depth = len(current_path)
-        in_run = path_depth > 0 and current_path[0] == ICONS["run"]
-        in_apps = path_depth > 0 and current_path[0] == ICONS["apps"]
-        in_opts = path_depth > 0 and current_path[0] == ICONS["opts"]
-        in_config = path_depth > 0 and current_path[0] == ICONS["config"]
+        in_run = path_depth > 0 and current_path[0] == LABELS["run"]
+        in_apps = path_depth > 0 and current_path[0] == LABELS["apps"]
+        in_opts = path_depth > 0 and current_path[0] == LABELS["opts"]
+        in_config = path_depth > 0 and current_path[0] == LABELS["config"]
 
         show_icons = in_apps or settings.get("show_icons_globally", False)
         rofi_base_cmd = engine.build_rofi_args(settings, enable_icons=show_icons)
@@ -94,20 +94,20 @@ def main():
             
             # B. Pinned Modes
             for m_key in ["run", "apps", "config", "opts"]:
-                label = ICONS[m_key]
+                label = LABELS[m_key]
                 rofi_list.append(f"{label}\0icon\x1f{NAV_ICONS.get(label, 'folder')}")
                 options_dict[label] = label
 
             rofi_list.append(SEP_LINE)
 
             # C. Home Search Pool
-            run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
+            run_pool = {f"{k.split('RUN:')[1]}    ({LABELS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
             flat_menu = engine.get_flat_menu(menu_data)
             combined_pool = {**flat_menu, **run_pool}
             
             def global_sort(x):
                 clean = x.split("\0")[0]
-                if clean.endswith(f"({ICONS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
+                if clean.endswith(f"({LABELS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
                 return weights.get(f"HOME:{clean}", 0)
             
             sorted_pool = sorted(combined_pool.keys(), key=global_sort, reverse=True)
@@ -121,9 +121,9 @@ def main():
                 options_dict[label] = label
         else:
             # Sub-menu navigation
-            rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS[ICONS['back']]}")
+            rofi_list.append(f"{LABELS['back']}\0icon\x1f{NAV_ICONS[LABELS['back']]}")
             if path_depth >= 2:
-                rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS[ICONS['home']]}")
+                rofi_list.append(f"{LABELS['home']}\0icon\x1f{NAV_ICONS[LABELS['home']]}")
             
             items = list(active_menu.keys())
             if in_apps:
@@ -135,13 +135,13 @@ def main():
             elif in_config:
                 home = os.path.expanduser("~")
                 def config_sort(x):
-                    return (weights.get(f"{ICONS['config']}:{os.path.basename(x)}", 0), os.path.basename(x).lower())
+                    return (weights.get(f"{LABELS['config']}:{os.path.basename(x)}", 0), os.path.basename(x).lower())
                 
                 items.sort(key=config_sort, reverse=True)
                 for fp in items:
                     fname = os.path.basename(fp)
                     label = f"📄 {fname}    ({fp.replace(home, '~')})"
-                    w = weights.get(f"{ICONS['config']}:{fname}", 0)
+                    w = weights.get(f"{LABELS['config']}:{fname}", 0)
                     icon = "🔥" if w > 5 else "📄"
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = fp
@@ -166,11 +166,11 @@ def main():
             continue
 
         # 7. Execution Engine
-        if choice.startswith(ICONS["back"]):
+        if choice.startswith(LABELS["back"]):
             if current_path: current_path.pop()
-        elif choice.startswith(ICONS.get("home", "🏠")) and ICONS.get("home") in choice:
+        elif choice.startswith(LABELS.get("home", "🏠")) and LABELS.get("home") in choice:
             current_path = []
-        elif choice in ICONS.values():
+        elif choice in LABELS.values():
             current_path = [choice]
         else:
             # Web Search
@@ -204,7 +204,7 @@ def main():
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
 
                 # History
-                is_r = "(" + ICONS["run"] in choice or in_run
+                is_r = "(" + LABELS["run"] in choice or in_run
                 if settings.get("remember_history", True):
                     if is_r: w_key = f"RUN:{cmd[5:] if cmd.startswith('TERM:') else cmd}"
                     else: w_key = f"{path_str if current_path else 'HOME'}:{f_key}"
