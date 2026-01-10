@@ -157,7 +157,7 @@ def main():
         # 6. Interaction
         p_key = "HUB" if not current_path else current_path[0]
         symbol = PROMPT_ICONS.get(p_key, PROMPT_ICONS["DEFAULT"])
-        breadcrumb = symbol if not current_path else f"{symbol} {path_str}"
+        breadcrumb = symbol if not current_path else f"{path_str}"
         
         proc = subprocess.run([str(x) for x in rofi_base_cmd] + ["-p", breadcrumb], input="\n".join(rofi_list), text=True, capture_output=True)
         choice = proc.stdout.strip().split("\0")[0]

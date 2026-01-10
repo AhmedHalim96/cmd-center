@@ -5,7 +5,7 @@ from modules import config
 ICONS = {
     "opts": "⚙️️️ Menu Settings",
     "apps": "📱 Applications",
-    "run": "🚀 Run Command",
+    "run": "🚀 Run",
     "config": "📝 Config Editor",
     "back": "⬅ BACK",
     "home": "🏠 HOME",
