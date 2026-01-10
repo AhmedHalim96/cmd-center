@@ -78,40 +78,47 @@ def main():
         except:
             current_path, active_menu = [], menu_data
 
-        rofi_list, options_dict, combined_pool = [], {}, {}
+        rofi_list, options_dict = [], {}
         path_str = " > ".join(current_path)
 
         # 5. Build Rofi List
         if not current_path:
+            # A. User Categories
             cats = sorted(menu_data.keys(), key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             for cat in cats:
                 val = menu_data[cat]
                 icon = val.get("icon", FOLDER_ICON) if isinstance(val, dict) else FOLDER_ICON
-                rofi_list.append(f"{icon}  {cat}\0icon\x1f{icon}")
+                label = f"{icon}  {cat}"
+                rofi_list.append(f"{label}\0icon\x1f{icon}")
+                options_dict[label] = cat
             
+            # B. Pinned Modes
             for m_key in ["run", "apps", "config", "opts"]:
                 label = ICONS[m_key]
                 rofi_list.append(f"{label}\0icon\x1f{NAV_ICONS.get(label, 'folder')}")
+                options_dict[label] = label
 
             rofi_list.append(SEP_LINE)
-            
-            app_pool = {f"{n}    ({ICONS['apps']})\0icon\x1f{d.get('icon', '')}": d for n, d in scanner.get_system_apps().items()}
+
+            # C. Home Search Pool (Custom items + Binaries, NO system apps)
             run_pool = {f"{k.split('RUN:')[1]}    ({ICONS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
-            combined_pool = {**engine.get_flat_menu(menu_data), **app_pool, **run_pool}
+            # Note: app_pool removed here to keep home clean
+            combined_pool = {**engine.get_flat_menu(menu_data), **run_pool}
             
             def global_sort(x):
                 clean = x.split("\0")[0]
-                if clean.endswith(f"({ICONS['apps']})"): return weights.get(f"APP:{clean.split('    (')[0]}", 0)
                 if clean.endswith(f"({ICONS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
                 return weights.get(f"HOME:{clean}", 0)
             
             rofi_list.extend(sorted(combined_pool.keys(), key=global_sort, reverse=True))
             for k in combined_pool.keys(): options_dict[k.split("\0")[0]] = k 
-            for c in menu_data: 
-                icon = menu_data[c].get('icon', FOLDER_ICON) if isinstance(menu_data[c], dict) else FOLDER_ICON
-                options_dict[f"{icon}  {c}"] = c
-            for k in ICONS: options_dict[ICONS[k]] = ICONS[k]
+
+            # D. Internal Menu
+            for label in INTERNAL_MENU.keys():
+                rofi_list.append(f"{label}\0icon\x1f{FOLDER_ICON}")
+                options_dict[label] = label
         else:
+            # Sub-menu navigation
             rofi_list.append(f"{ICONS['back']}\0icon\x1f{NAV_ICONS[ICONS['back']]}")
             if path_depth >= 2:
                 rofi_list.append(f"{ICONS['home']}\0icon\x1f{NAV_ICONS[ICONS['home']]}")
@@ -124,7 +131,6 @@ def main():
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower() if weights.get(f"RUN:{x}", 0) == 0 else ""), reverse=True)
                 for i in items: rofi_list.append(f"🚀  {i}\0icon\x1f{RUN_ICON}")
             elif in_config:
-                # Weighted Sort for Config Editor
                 home = os.path.expanduser("~")
                 def config_sort(x):
                     label = f"📄 {os.path.basename(x)}    ({x.replace(home, '~')})"
@@ -139,13 +145,15 @@ def main():
                     rofi_list.append(f"{label}\0icon\x1f{icon}")
                     options_dict[label] = fp
             else:
+                items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
                 for i in items:
                     v = active_menu[i]
                     icon = v.get("icon", FOLDER_ICON) if isinstance(v, dict) else FOLDER_ICON
-                    rofi_list.append(f"{icon}  {i}\0icon\x1f{icon}")
-                    options_dict[f"{icon}  {i}"] = i
+                    label = f"{icon}  {i}"
+                    rofi_list.append(f"{label}\0icon\x1f{icon}")
+                    options_dict[label] = i
 
-        # 6. Interaction & Breadcrumbs
+        # 6. Interaction
         p_key = "HUB" if not current_path else current_path[0]
         symbol = PROMPT_ICONS.get(p_key, PROMPT_ICONS["DEFAULT"])
         breadcrumb = symbol if not current_path else f"{symbol} {path_str}"
@@ -156,7 +164,7 @@ def main():
             if not choice: sys.exit(0)
             continue
 
-        # 7. Execution Engine (Emoji-Proof Fix)
+        # 7. Execution Engine
         if choice.startswith(ICONS["back"]):
             if current_path: current_path.pop()
         elif choice.startswith(ICONS["home"]):
@@ -171,7 +179,13 @@ def main():
                 sys.exit(0)
 
             f_key = options_dict.get(choice, choice)
-            sel = combined_pool.get(f_key) or menu_data.get(f_key) if not current_path else active_menu.get(f_key)
+            
+            # Resolve Selection
+            if not current_path:
+                # First check internal menu, then custom pool, then categories
+                sel = INTERNAL_MENU.get(f_key) or combined_pool.get(f_key) or menu_data.get(f_key)
+            else:
+                sel = active_menu.get(f_key)
             
             if sel is None and in_run: sel = choice.replace("🚀  ", "")
             if sel is None: continue
@@ -189,18 +203,17 @@ def main():
                 if cmd == "INTERNAL:CLEAR_HIST":
                     state["history"] = {}; config.save_json(config.STATE_PATH, state); sys.exit(0)
 
-                # History tracking
-                is_a, is_r = "(" + ICONS["apps"] in choice or in_apps, "(" + ICONS["run"] in choice or in_run
+                # History
+                is_r = "(" + ICONS["run"] in choice or in_run
                 if settings.get("remember_history", True):
                     if is_r: w_key = f"RUN:{cmd[5:] if cmd.startswith('TERM:') else cmd}"
-                    elif is_a: w_key = f"APP:{choice.split('    (')[0]}"
-                    else: w_key = f"{path_str if current_path else 'HOME'}:{choice}"
+                    else: w_key = f"{path_str if current_path else 'HOME'}:{f_key}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
                 state["last_path"], state["history"] = current_path, weights
                 config.save_json(config.STATE_PATH, state)
 
-                # Launch logic
+                # Launch
                 term = settings.get("terminal_emulator", "wezterm start --")
                 if cmd.startswith("EDT:"):
                     f_cmd = f"{term} {settings.get('editor', 'nvim')} '{os.path.expanduser(cmd[4:].strip())}'"
