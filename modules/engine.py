@@ -19,7 +19,7 @@ def build_rofi_args(settings, enable_icons=False):
         
     return cmd
 
-def get_flat_menu(menu, prefix=""):
+def get_flat_menu(menu, prefix="", in_apps=False):
     """
     Recursively flattens the menu for Global Search.
     Supports both old (string) and new (object) configurations.
@@ -47,7 +47,7 @@ def get_flat_menu(menu, prefix=""):
             
             display_name = f"{label}    ({prefix})" if prefix else label
             # We use Rofi's metadata protocol: \0icon\x1fPATH
-            rofi_entry = f"{display_name}\0icon\x1f{icon}"
+            rofi_entry = f"{display_name}"
             
             flat[rofi_entry] = val
             

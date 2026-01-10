@@ -89,49 +89,51 @@ def main():
                 val = menu_data[cat]
                 icon = val.get("icon", FOLDER_ICON) if isinstance(val, dict) else FOLDER_ICON
                 label = f"{icon}  {cat}"
-                rofi_list.append(f"{label}\0icon\x1f{icon}")
+                rofi_list.append(f"{label}")
                 options_dict[label] = cat
             
             # B. Pinned Modes
             for m_key in ["run", "apps", "config", "opts"]:
                 label = LABELS[m_key]
-                rofi_list.append(f"{label}\0icon\x1f{NAV_ICONS.get(label, 'folder')}")
+                rofi_list.append(f"{label}")
                 options_dict[label] = label
 
             rofi_list.append(SEP_LINE)
 
             # C. Home Search Pool
-            run_pool = {f"{k.split('RUN:')[1]}    ({LABELS['run']})\0icon\x1f{RUN_ICON}": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
+            run_pool = {f"{k.split('RUN:')[1]}    ({LABELS['run']})": k.split('RUN:')[1] for k in weights.keys() if k.startswith("RUN:")}
             flat_menu = engine.get_flat_menu(menu_data)
             combined_pool = {**flat_menu, **run_pool}
             
             def global_sort(x):
-                clean = x.split("\0")[0]
-                if clean.endswith(f"({LABELS['run']})"): return weights.get(f"RUN:{clean.split('    (')[0]}", 0)
-                return weights.get(f"HOME:{clean}", 0)
+                clean_name = x.split("\0")[0]
+                if clean_name.endswith(f"({LABELS['apps']})"): return weights.get(f"APPS:{clean_name.split('    (')[0]}", 0)
+                if clean_name.endswith(f"({LABELS['run']})"): return weights.get(f"RUN:{clean_name.split('    (')[0]}", 0)
+                return weights.get(f"HOME:{clean_name}", 0)
             
             sorted_pool = sorted(combined_pool.keys(), key=global_sort, reverse=True)
             rofi_list.extend(sorted_pool)
             for k in combined_pool.keys(): 
-                options_dict[k.split("\0")[0]] = k 
+                options_dict[k.split("\0")[0]] = k.split("\0")[0] 
 
             # D. Internal Menu
             for label in INTERNAL_MENU.keys():
-                rofi_list.append(f"{label}\0icon\x1f{FOLDER_ICON}")
+                rofi_list.append(f"{label}")
                 options_dict[label] = label
         else:
             # Sub-menu navigation
-            rofi_list.append(f"{LABELS['back']}\0icon\x1f{NAV_ICONS[LABELS['back']]}")
+            rofi_list.append(f"{LABELS['back']}")
             if path_depth >= 2:
-                rofi_list.append(f"{LABELS['home']}\0icon\x1f{NAV_ICONS[LABELS['home']]}")
+                rofi_list.append(f"{LABELS['home']}")
             
             items = list(active_menu.keys())
             if in_apps:
-                items.sort(key=lambda x: (weights.get(f"APP:{x}", 0), x.lower()), reverse=True)
+                items.sort(key=lambda x: (weights.get(f"APPS:{x}", 0), x.lower()), reverse=True)
+                
                 for i in items: rofi_list.append(f"{i}\0icon\x1f{active_menu[i].get('icon', '')}")
             elif in_run:
                 items.sort(key=lambda x: (weights.get(f"RUN:{x}", 0), x.lower()), reverse=True)
-                for i in items: rofi_list.append(f"🚀  {i}\0icon\x1f{RUN_ICON}")
+                for i in items: rofi_list.append(f"🚀  {i}")
             elif in_config:
                 home = os.path.expanduser("~")
                 def config_sort(x):
@@ -143,7 +145,7 @@ def main():
                     label = f"📄 {fname}    ({fp.replace(home, '~')})"
                     w = weights.get(f"{LABELS['config']}:{fname}", 0)
                     icon = "🔥" if w > 5 else "📄"
-                    rofi_list.append(f"{label}\0icon\x1f{icon}")
+                    rofi_list.append(f"{label}")
                     options_dict[label] = fp
             else:
                 items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
@@ -151,7 +153,7 @@ def main():
                     v = active_menu[i]
                     icon = v.get("icon", FOLDER_ICON) if isinstance(v, dict) else FOLDER_ICON
                     label = f"{icon}  {i}"
-                    rofi_list.append(f"{label}\0icon\x1f{icon}")
+                    rofi_list.append(f"{label}")
                     options_dict[label] = i
 
         # 6. Interaction
@@ -207,6 +209,7 @@ def main():
                 is_r = "(" + LABELS["run"] in choice or in_run
                 if settings.get("remember_history", True):
                     if is_r: w_key = f"RUN:{cmd[5:] if cmd.startswith('TERM:') else cmd}"
+                    elif in_apps: w_key = f"APPS:{f_key}"
                     else: w_key = f"{path_str if current_path else 'HOME'}:{f_key}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
