@@ -23,7 +23,6 @@ NAV_ICONS = {
 }
 
 # Default icons for general items
-FOLDER_ICON = ""
 RUN_ICON = "utilities-terminal"
 SEP_LINE = "────────────────────────────────────────"
 

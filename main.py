@@ -3,7 +3,7 @@ import subprocess, os, sys, argparse, tempfile
 from modules import config, scanner, engine
 from modules.constants import (
     LABELS, NAV_ICONS, PROMPT_ICONS, SEP_LINE, RUN_ICON, 
-    FOLDER_ICON, INTERNAL_MENU, CLI_ONLY, SEARCH_PROVIDERS, 
+     INTERNAL_MENU, CLI_ONLY, SEARCH_PROVIDERS, 
     get_help_text, get_internal_help
 )
 
@@ -88,8 +88,8 @@ def main():
             cats = sorted(menu_data.keys(), key=lambda x: weights.get(f"HOME:{x}", 0), reverse=True)
             for cat in cats:
                 val = menu_data[cat]
-                icon = val.get("icon", FOLDER_ICON) if isinstance(val, dict) else FOLDER_ICON
-                label = f"{icon}  {cat}"
+                icon = val.get("icon", False) if isinstance(val, dict) else False 
+                label = f"{icon}  {cat}" if icon else f"{cat}"
                 rofi_list.append(f"{label}")
                 options_dict[label] = cat
             
@@ -154,8 +154,8 @@ def main():
                 items.sort(key=lambda x: weights.get(f"{path_str}:{x}", 0), reverse=True)
                 for i in items:
                     v = active_menu[i]
-                    icon = v.get("icon", FOLDER_ICON) if isinstance(v, dict) else FOLDER_ICON
-                    label = f"{icon}  {i}"
+                    icon = v.get("icon", False) if isinstance(v, dict) else False 
+                    label = f"{icon}  {i}" if icon else f"{i}"
                     rofi_list.append(f"{label}")
                     options_dict[label] = i
 
