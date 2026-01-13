@@ -137,13 +137,13 @@ def main():
             elif in_config:
                 home = os.path.expanduser("~")
                 def config_sort(x):
-                    return (weights.get(f"{LABELS['config']}:{os.path.basename(x)}", 0), os.path.basename(x).lower())
+                    return (weights.get(f"CONFIG:{x}", 0), os.path.basename(x).lower())
                 
                 items.sort(key=config_sort, reverse=True)
                 for fp in items:
                     fname = os.path.basename(fp)
                     label = f"📄 {fname}    ({fp.replace(home, '~')})"
-                    w = weights.get(f"{LABELS['config']}:{fname}", 0)
+                    w = weights.get(f"CONFIG:{fname}", 0)
                     icon = "🔥" if w > 5 else "📄"
                     rofi_list.append(f"{label}")
                     options_dict[label] = fp
