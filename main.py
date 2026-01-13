@@ -35,6 +35,7 @@ def main():
 
     while True:
         path_depth = len(current_path)
+        is_direct_mode = len(sys.argv) > 1 and sys.argv[1] in ["apps", "run", "config", "options"]
         in_run = path_depth > 0 and current_path[0] == LABELS["run"]
         in_apps = path_depth > 0 and current_path[0] == LABELS["apps"]
         in_opts = path_depth > 0 and current_path[0] == LABELS["opts"]
@@ -122,7 +123,9 @@ def main():
                 options_dict[label] = label
         else:
             # Sub-menu navigation
-            rofi_list.append(f"{LABELS['back']}")
+            print(is_direct_mode, path_depth, current_path)
+            if (not is_direct_mode) and path_depth >= 1:
+                rofi_list.append(f"{LABELS['back']}")
             if path_depth >= 2:
                 rofi_list.append(f"{LABELS['home']}")
             
