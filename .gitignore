@@ -1,2 +1,2 @@
 *-test.json
-*.pyc
+__pycache__/
