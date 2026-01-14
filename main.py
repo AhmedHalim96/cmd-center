@@ -123,9 +123,9 @@ def main():
                 options_dict[label] = label
         else:
             # Sub-menu navigation
-            print(is_direct_mode, path_depth, current_path)
             if (not is_direct_mode) and path_depth >= 1:
                 rofi_list.append(f"{LABELS['back']}")
+
             if path_depth >= 2:
                 rofi_list.append(f"{LABELS['home']}")
             
@@ -213,6 +213,7 @@ def main():
                 if settings.get("remember_history", True):
                     if is_r: w_key = f"RUN:{cmd[5:] if cmd.startswith('TERM:') else cmd}"
                     elif in_apps: w_key = f"APPS:{f_key}"
+                    elif in_config: w_key = f"CONFIG:{f_key}"
                     else: w_key = f"{path_str if current_path else 'HOME'}:{f_key}"
                     weights[w_key] = weights.get(w_key, 0) + 1
                 
